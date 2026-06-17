@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Stella Maris College — Guidance Center</title>
+<link rel="icon" type="image/x-icon" href="assets/favicon.ico">
+<link rel="shortcut icon" href="assets/favicon.ico">
+<link rel="apple-touch-icon" href="assets/favicon.ico">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/eval-built.css">
+<link rel="stylesheet" href="css/drive-folder.css">
+<script>try{if(localStorage.getItem("smc-theme")==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}</script>
+</head>
+<body>
+
+<div id="boot">
+<img src="assets/logo.jpg" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--gold)" onerror="this.style.display='none'" alt="Stella Maris College">
+<div class="spin"></div>
+<p>Loading system…</p>
+</div>
+
+<div id="authScreen" class="screen">
+<div class="al">
+<div class="abadge">
+<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+<span>Secure Guidance System</span>
+</div>
+<h1>Guidance &<br><em>Counseling</em><br>Dashboard</h1>
+<div class="adiv"></div>
+<p>A dedicated monitoring platform for the Guidance Office of Stella Maris College. Access is restricted to registered counselors.</p>
+<div class="ainfo">
+<div class="astat"><strong id="authTotal">—</strong><small>Total Sessions</small></div>
+<div class="astat"><strong id="authStudents">—</strong><small>Students</small></div>
+</div>
+
+<div class="al-gallery" aria-hidden="true">
+<img src="assets/login-1.jpg" alt="" onerror="this.classList.add('miss')">
+<img src="assets/login-2.jpg" alt="" onerror="this.classList.add('miss')">
+<img src="assets/login-3.jpg" alt="" onerror="this.classList.add('miss')">
+<img src="assets/login-4.jpg" alt="" onerror="this.classList.add('miss')">
+<img src="assets/login-5.jpg" alt="" onerror="this.classList.add('miss')">
+<img src="assets/login-6.jpg" alt="" onerror="this.classList.add('miss')">
+</div>
+<div class="al-cap">
+<img src="assets/logo.jpg" alt="SMC" onerror="this.style.display='none'">
+<span>Stella Maris College — Guidance Center</span>
+</div>
+<div class="sec-info">
+<strong>Privacy &amp; Security</strong><br>
+Authentication and student data are handled by a secure server. No passwords, registration codes, or records are stored in this page or in your browser. Records are returned only after a valid sign-in and are scoped to your account.
+</div>
+</div>
+
+<div class="ar">
+<div class="alogo">
+<img src="assets/logo.jpg" onerror="this.style.display='none'" alt="SMC">
+<div class="alogo-t">
+<strong>Stella Maris College</strong>
+<span>Guidance Office</span>
+</div>
+</div>
+<div class="tabs">
+<button class="tabx on" id="tabLogin">Sign In</button>
+<button class="tabx" id="tabReg">Register</button>
+</div>
+
+<div class="aform on" id="loginForm">
+<div class="fg">
+<label for="liUser">Username</label>
+<input type="text" id="liUser" placeholder="Your username" autocomplete="username">
+</div>
+<div class="fg">
+<label for="liPass">Password</label>
+<input type="password" id="liPass" placeholder="Your password" autocomplete="current-password">
+</div>
+<div class="ferr" id="liErr" role="alert"></div>
+<button class="abtn" id="doLoginBtn">Sign In</button>
+<p class="anote">No account? <strong id="goReg">Register here</strong> using your counselor code.</p>
+</div>
+
+<div class="aform" id="registerForm">
+<div class="fg">
+<label for="regName">Full Name</label>
+<input type="text" id="regName" placeholder="Your full name">
+</div>
+<div class="fg">
+<label for="regUser">Username</label>
+<input type="text" id="regUser" placeholder="Letters, numbers, underscores">
+</div>
+<div class="fg">
+<label for="regPass">Password</label>
+<input type="password" id="regPass" placeholder="Min 8 chars, 1 uppercase, 1 number">
+</div>
+<div class="fg">
+<label for="regCode">Registration Code</label>
+<input type="password" id="regCode" placeholder="Code from Guidance Office">
+</div>
+<div class="ferr" id="regErr" role="alert"></div>
+<button class="abtn" id="doRegBtn">Create Account</button>
+<p class="anote">Ask the Guidance Office for the <strong id="goLogin">registration code</strong>.</p>
+<p class="anote">New here? <strong class="atut-link" id="goTut">View the step-by-step setup guide</strong></p>
+</div>
+</div>
+</div>
+
+<div id="appScreen" class="screen">
+
+<div class="mob-top" id="mobTop">
+<button class="mob-hamburger" id="mobMenuBtn" aria-label="Open menu">
+<svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+</button>
+<span class="mob-top-title">Guidance Dashboard</span>
+</div>
+<div class="mob-overlay" id="mobOverlay"></div>
+
+<nav class="sb" id="sidebar" aria-label="Main navigation">
+<img src="assets/logo.jpg" class="sblogo" onerror="this.style.display='none'" alt="SMC">
+<button class="sbi on" id="navDash">
+<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+<span>Dashboard</span>
+</button>
+<button class="sbi" id="navEval" style="display:none">
+<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+<span>Teacher Evaluations</span>
+</button>
+<button class="sbi" id="navProcedures" style="display:none">
+<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+<span>Assessment Procedures</span>
+</button>
+<button class="sbi" id="navEvalProc" style="display:none">
+<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="12" y="6" width="3" height="11"/><rect x="17" y="13" width="3" height="4"/></svg>
+<span>Evaluation Results</span>
+</button>
+<button class="sbi" id="navCounselors" style="display:none">
+<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+<span>Staff &amp; Access</span>
+</button>
+<button class="sbi" id="navEvalDash">
+<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+<span>Eval Dashboard</span>
+</button>
+<div class="sbsp"></div>
+<div class="sbu-wrap" id="profileMenu">
+<button class="sbu" id="profileBtn" type="button" aria-haspopup="true" aria-expanded="false">
+<div class="sbav" id="sbAv">?</div>
+<div class="sbui">
+<strong id="sbName">—</strong>
+<small id="sbRole">—</small>
+</div>
+<svg class="sbu-caret" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+</button>
+<div class="sbu-menu" id="profileDropdown" role="menu">
+<div class="sbu-menu-head">
+<div class="sbav lg" id="pmAv">?</div>
+<div class="sbu-menu-id"><strong id="pmName">—</strong><small id="pmRole">—</small></div>
+</div>
+<button class="sbu-mi" id="pmProfile" type="button" role="menuitem"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg><span>My Profile</span></button>
+<button class="sbu-mi" id="pmSettings" type="button" role="menuitem"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>Settings</span></button>
+<button class="sbu-mi" id="pmHelp" type="button" role="menuitem"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>How to use</span></button>
+<div class="sbu-menu-div"></div>
+<button class="sbu-mi danger" id="pmLogout" type="button" role="menuitem"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>Sign Out</span></button>
+</div>
+</div>
+</nav>
+
+<div class="main">
+<div class="sesnote" id="sesNote">Your session will expire soon. Save your work.</div>
+
+<div class="topbar">
+<div class="topbar-left">
+<h2 id="viewTitle">Dashboard</h2>
+<p id="viewSub">Stella Maris College · Guidance Office</p>
+<button id="maintBtn" class="maint-btn" style="display:none" title="Maintenance mode (admin only)"></button>
+</div>
+<div class="srch" id="topSearch">
+<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+<input type="text" id="searchInput" placeholder="Search students…" aria-label="Search students">
+</div>
+</div>
+
+<div class="srch-wrap" style="display:none" id="mobSearchWrap">
+<div class="srch" style="width:100%">
+<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+<input type="text" id="searchInputMob" placeholder="Search students…" aria-label="Search students">
+</div>
+</div>
+
+<div id="dashView">
+<a class="gform-cta" href="https://forms.gle/4nTMJkpNAazQ8K2p6" target="_blank" rel="noopener noreferrer">
+<div class="gform-cta-ic"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 2h6a2 2 0 0 1 2 2v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1V4a2 2 0 0 1 2-2z"/><path d="M9 5h6"/><path d="M9 12l2 2 4-4"/></svg></div>
+<div class="gform-cta-tx"><div class="gform-cta-t">Session Notes Google Form</div><div class="gform-cta-s">Open the official Google Form to record a new counseling session note.</div></div>
+<span class="gform-cta-go">Open form <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
+</a>
+<div class="stats">
+<div class="scard" style="--c:var(--navy2);--bg:var(--smoke)">
+<div class="scicon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+<div><div class="sclabel">Students</div><div class="scval" id="stS">0</div><div class="scsub">unique individuals</div></div>
+</div>
+<div class="scard" style="--c:var(--teal);--bg:#E4F5F3">
+<div class="scicon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+<div><div class="sclabel">Sessions</div><div class="scval" id="stSe">0</div><div class="scsub">recorded entries</div></div>
+</div>
+<div class="scard" style="--c:#D47B2A;--bg:#FEF3E2">
+<div class="scicon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+<div><div class="sclabel">Anxiety</div><div class="scval" id="stA">0</div><div class="scsub">presenting concern</div></div>
+</div>
+<div class="scard" style="--c:var(--red);--bg:#FDEAEA">
+<div class="scicon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+<div><div class="sclabel">Depression</div><div class="scval" id="stD">0</div><div class="scsub">presenting concern</div></div>
+</div>
+<div class="scard" style="--c:var(--gold);--bg:#FBF4E2">
+<div class="scicon"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h11"/></svg></div>
+<div><div class="sclabel">Evaluations</div><div class="scval" id="stEv">0</div><div class="scsub" id="stEvSub">tracker tasks</div></div>
+</div>
+</div>
+
+<div class="g2">
+<div class="panel" style="position:relative">
+<div class="loading-overlay" id="tableLoader"><div class="spin"></div></div>
+<div class="ph">
+<span class="ph-t">Student Records</span>
+<span id="recCount" style="font-size:12px;color:var(--mist)"></span>
+</div>
+<div class="frow">
+<div class="fi"><label for="gradeFilter">Grade</label><select id="gradeFilter"><option value="">All</option></select></div>
+<div class="fi"><label for="designateFilter">Designate</label><select id="designateFilter"><option value="">All</option></select></div>
+<div class="fi"><label for="issueFilter">Issue</label>
+<select id="issueFilter"><option value="">All</option><option value="Anxiety">Anxiety</option><option value="Depression">Depression</option></select>
+</div>
+<div class="fi"><label for="dateFrom">From</label><input type="date" id="dateFrom"></div>
+<div class="fi"><label for="dateTo">To</label><input type="date" id="dateTo"></div>
+</div>
+<div class="tw">
+<table>
+<thead><tr><th>#</th><th>Student Name</th><th>Grade</th><th>Date</th><th>Designate</th><th>Issue</th><th>Actions</th></tr></thead>
+<tbody id="tbody"></tbody>
+</table>
+</div>
+<div class="pager">
+<span id="pagerInfo"></span>
+<div class="pbtns" id="pbtns"></div>
+</div>
+</div>
+
+<div class="gside">
+<div class="panel">
+<div class="ph"><span class="ph-t">Issue Breakdown</span></div>
+<div class="cpad"><canvas id="pieChart" height="180"></canvas><div class="cleg" id="pieLeg"></div></div>
+</div>
+<div class="panel">
+<div class="ph"><span class="ph-t">By Grade Level</span></div>
+<div class="cpad"><canvas id="barChart" height="160"></canvas></div>
+</div>
+</div>
+</div>
+</div>
+
+<div id="counselorsView" style="display:none">
+<div class="panel">
+<div class="ph"><span class="ph-t">Staff &amp; Access Levels</span></div>
+<div class="access-legend">
+<span class="al-item"><span class="rpill ra">admin</span> Full access \u2014 records, evaluations, accounts &amp; roles</span>
+<span class="al-item"><span class="rpill rco">co-admin</span> Manage evaluations &amp; view roster</span>
+<span class="al-item"><span class="rpill rc">counselor</span> Own records &amp; assigned evaluations</span>
+</div>
+<div class="tw">
+<table>
+<thead><tr><th>#</th><th>Full Name</th><th>Username</th><th>Access</th><th>Manage</th></tr></thead>
+<tbody id="cTbody"></tbody>
+</table>
+</div>
+</div>
+</div>
+
+<div id="evalView" style="display:none">
+<div class="panel">
+<div class="ph">
+<span class="ph-t">Teacher Evaluation Tracker</span>
+<div class="ph-actions">
+<span id="evalCount" style="font-size:12px;color:var(--mist)"></span>
+<button class="abtn-sm" id="evalNewBtn" style="display:none">+ New Evaluation</button>
+</div>
+</div>
+<div class="frow">
+<div class="fi"><label for="evalStatusFilter">Status</label>
+<select id="evalStatusFilter"><option value="">All</option><option value="Pending">Pending</option><option value="Started">Started</option><option value="Done">Done</option></select>
+</div>
+<div class="fi fi-grow"><label for="evalSearch">Search teacher</label>
+<input type="text" id="evalSearch" placeholder="Search teachers…" autocomplete="off" aria-label="Search teachers">
+</div>
+</div>
+<div class="tw">
+<table>
+<thead><tr><th>#</th><th>Evaluation</th><th>Teacher</th><th>Status</th><th>Assigned To</th><th>Checked By</th><th>Actions</th></tr></thead>
+<tbody id="evalTbody"></tbody>
+</table>
+</div>
+</div>
+</div>
+
+<div id="proceduresView" style="display:none">
+<div class="panel proc-panel">
+<div class="ph"><span class="ph-t">Assessment Procedures</span></div>
+<p class="proc-intro">Reference guide for the conduct of entrance assessments. Click a section to expand it.</p>
+<div id="proceduresBody" class="proc-wrap"></div>
+</div>
+</div>
+
+<div id="evalProcView" style="display:none">
+<div class="panel">
+<div class="ph">
+<span class="ph-t">Teacher Evaluation Results</span>
+</div>
+<div id="evalProcBody"></div>
+</div>
+</div>
+
+<div id="profileView" style="display:none"></div>
+
+<div id="evalDashView" style="display:none"></div>
+
+<footer class="site-footer">
+<div class="sf-main">Stella Maris College &mdash; Guidance Center Official Website</div>
+<div class="sf-sub">&copy; <span id="sfYear"></span> Stella Maris College Guidance Center. All rights reserved.</div>
+<div class="sf-tech">powered by GitHub &amp; Visual Studio Code</div>
+</footer>
+</div>
+</div>
+
+<div class="ov" id="viewModal" role="dialog" aria-modal="true" aria-labelledby="mName">
+<div class="mbox">
+<div class="mhd">
+<div style="min-width:0;flex:1">
+<div class="mname" id="mName">—</div>
+<div class="mtags" id="mTags"></div>
+</div>
+<button class="mcl" id="mCloseBtn" aria-label="Close dialog">✕</button>
+</div>
+<div class="mbody" id="mBody"></div>
+<div class="mft">
+<button class="mbtn mbtn-cl" id="mCancelBtn">Close</button>
+<button class="mbtn mbtn-pr" id="mPrintBtn">
+<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+Print</button>
+<button class="mbtn mbtn-pdf" id="mPdfBtn">
+<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+Save PDF</button>
+</div>
+</div>
+</div>
+
+<div class="ov" id="evalModal" role="dialog" aria-modal="true" aria-labelledby="evalModalTitle">
+<div class="mbox">
+<div class="mhd">
+<div style="min-width:0;flex:1">
+<div class="mname" id="evalModalTitle">New Evaluation</div>
+<div class="msub">Track who is tasked and who cross-checks each evaluation.</div>
+</div>
+<button class="mcl" id="evCloseBtn" aria-label="Close dialog">✕</button>
+</div>
+<div class="mbody">
+<div class="fg2">
+<div class="fg"><label for="evF_title">Evaluation Title</label><input type="text" id="evF_title" placeholder="e.g. Q1 Classroom Observation"></div>
+<div class="fg"><label for="evF_teacher">Teacher Being Evaluated</label><input type="text" id="evF_teacher" placeholder="e.g. Mr. Reyes"></div>
+</div>
+<div class="fg2">
+<div class="fg"><label for="evF_period">Period / Term</label><input type="text" id="evF_period" placeholder="e.g. 1st Quarter S.Y. 2026"></div>
+<div class="fg"><label for="evF_status">Status</label>
+<select id="evF_status"><option value="Pending">Pending</option><option value="Started">Started</option><option value="Done">Done</option></select>
+</div>
+</div>
+<div class="fg2">
+<div class="fg"><label for="evF_assigned">Assigned To <small>(tasked to evaluate)</small></label><input type="text" id="evF_assigned" placeholder="e.g. Ms. Tin"></div>
+<div class="fg"><label for="evF_checked">Checked By <small>(cross-checker)</small></label><input type="text" id="evF_checked" placeholder="e.g. Mr. Reyes"></div>
+</div>
+<div class="fg"><label for="evF_due">Due Date</label><input type="date" id="evF_due"></div>
+<div class="fg"><label for="evF_notes">Notes</label><textarea id="evF_notes" rows="3" placeholder="Findings, follow-ups, remarks\u2026"></textarea></div>
+<div class="ferr" id="evErr" role="alert"></div>
+</div>
+<div class="mft">
+<button class="mbtn mbtn-del" id="evDeleteBtn" style="display:none">Delete</button>
+<button class="mbtn mbtn-cl" id="evCancelBtn">Cancel</button>
+<button class="mbtn mbtn-pr" id="evSaveBtn">Save</button>
+</div>
+</div>
+</div>
+
+<div id="printArea" aria-hidden="true"></div>
+<div class="tut-ov" id="tutorial" aria-hidden="true">
+<div class="tut-box" role="dialog" aria-modal="true" aria-labelledby="tutTitle">
+<button class="tut-x" id="tutClose" type="button" aria-label="Close">&times;</button>
+<div class="tut-head">
+<div class="tut-badge"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>
+<div><h2 id="tutTitle">Getting Started</h2><p>How to set up and use the Guidance Center website</p></div>
+</div>
+<ol class="tut-steps">
+<li><strong>Get your registration code</strong><span>Ask the Guidance Office for the one-time registration code. You will need it to create your account.</span></li>
+<li><strong>Create your account</strong><span>On the Register tab, enter your full name, a username (letters, numbers and underscores), a password (at least 8 characters with 1 uppercase letter and 1 number), and your registration code. Then click Create Account.</span></li>
+<li><strong>Sign in</strong><span>Switch to the Sign In tab and log in with your new username and password.</span></li>
+<li><strong>Explore the Dashboard</strong><span>See session and student statistics at a glance, and use the Session Notes Google Form button to record a new counseling session.</span></li>
+<li><strong>Review student records</strong><span>Use the search bar and the dashboard tables to filter and review the sessions assigned to you.</span></li>
+<li><strong>Teacher Evaluations &amp; Results</strong><span>Track teacher evaluations and open Evaluation Results to compute and view processed scores.</span></li>
+<li><strong>Set up your profile</strong><span>Click your name in the top-right corner, then choose My Profile to add your photo, role and notes.</span></li>
+<li><strong>Sign out safely</strong><span>When you are done, open the same top-right menu and click Sign Out.</span></li>
+</ol>
+<button class="abtn" id="tutDone" type="button">Got it — let’s start</button>
+</div>
+</div>
+<div class="set-ov" id="settingsModal" aria-hidden="true">
+<div class="set-box" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+<button class="set-x" id="setClose" type="button" aria-label="Close settings">&times;</button>
+<div class="set-head">
+<div class="tut-badge"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+<div><h2 id="setTitle">Settings</h2><p>Preferences &amp; support</p></div>
+</div>
+<div class="set-sec">
+<h3>Appearance</h3>
+<div class="set-row">
+<div><strong>Dark mode</strong><span>Switch between the light and dark theme.</span></div>
+<button class="set-switch" id="setThemeToggle" type="button" role="switch" aria-checked="false" aria-label="Toggle dark mode"><span class="set-knob"></span></button>
+</div>
+</div>
+<div class="set-sec">
+<h3>Report a problem</h3>
+<p class="set-hint">Found a bug or have a suggestion? Send it to the admins.</p>
+<textarea id="setReportMsg" class="set-ta" placeholder="Describe the problem or suggestion…"></textarea>
+<div style="margin-top:10px"><button class="abtn" id="setReportSend" type="button">Send report</button></div>
+</div>
+<div class="set-sec" id="setReportsAdmin" style="display:none">
+<h3>Submitted reports <span class="set-count" id="setReportsCount"></span></h3>
+<div class="set-reports" id="setReportsList"></div>
+</div>
+</div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/config.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/export.js"></script>
+<script src="js/records.js"></script>
+<script src="js/evaluations.js"></script>
+<script src="js/procedures.js"></script>
+<script src="js/evalproc.js"></script>
+<script src="js/evaltemplate.js"></script>
+<script src="js/evalbuild.js"></script>
+<script src="js/evaldash.js"></script>
+<script src="js/profile.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/app.js"></script>
+<script>document.getElementById('sfYear').textContent = new Date().getFullYear();</script>
+</body>
+</html>
