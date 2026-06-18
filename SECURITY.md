@@ -3,9 +3,9 @@
 ## What was wrong in the original single-file version
 
 1. **The registration code was in the source.** Even though comments claimed
-   only the hash was stored, the line `hashPassword('maryofthepassion2026')`
+   only the hash was stored, the line `hashPassword('')`
    put the plaintext code directly in the file. Same for the seeded admin
-   password `admin2026`.
+   password ``.
 2. **All student data was publicly downloadable.** The page fetched a
    "Publish to web" Google Sheets CSV. Anyone who viewed the source got that
    URL and could download every record — names, grades, counseling notes,
