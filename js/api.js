@@ -78,6 +78,17 @@ SMC.api = (function () {
         saveProfile: function (data) { return call('saveProfile', data); },
         saveReport: function (message) { return call('saveReport', { message: message }); },
         listReports: function () { return call('listReports', {}); },
-        setReportStatus: function (id, status) { return call('setReportStatus', { id: id, status: status }); }
+        setReportStatus: function (id, status) { return call('setReportStatus', { id: id, status: status }); },
+        listIncidents: function () { return call('listIncidents', {}); },
+        saveIncident: function (data) { return call('saveIncident', data); },
+        deleteIncident: function (id) { return call('deleteIncident', { id: id }); },
+        listClassFlags: function () { return call('listClassFlags', {}); },
+        saveClassFlag: function (data) { return call('saveClassFlag', data); },
+        getClassColors: function () { return call('getClassColors', {}); },
+        setClassColor: function (data) { return call('setClassColor', data); },
+        securityStatus: function () { return call('securityStatus', {}); },
+        unlockSite: function (code) { return call('unlockSite', { code: code }); },
+        getSecurity: function () { return call('getSecurity', {}); },
+        setSecurity: function (data) { return call('setSecurity', data); }
     };
 })();

@@ -30,10 +30,10 @@ SMC.exporter = (function () {
                 pf('Verbal Comprehension', r.verbalComprehension) + pf('Gross Motor / Gait', r.grossMotor) + pf('Fine Motor Skills', r.fineMotor) +
                 pf('Compliance', r.compliance) + pf('Emotional Tone', r.emotionalTone) + pf('Emotional Management', r.emotionalManagement) +
                 pfl('Observation Remarks', r.observationRemarks) + '</div></div>' +
-                '<div class="pr-section"><div class="pr-section-title">Counselor Notes</div><div class="pr-grid">' +
+                '<div class="pr-section"><div class="pr-section-title">Guidance Designate Notes</div><div class="pr-grid">' +
                 pfl('Student Report', r.studentReport) + pfl('Actions Taken', r.actionsTaken) + pfl('Progress Evaluation', r.progressEvaluation) +
                 '</div></div>' +
-                '<div class="pr-sig"><div class="pr-sig-block">Guidance Counselor Signature</div><div class="pr-sig-block">Date</div></div>';
+                '<div class="pr-sig"><div class="pr-sig-block">Guidance Designate Signature</div><div class="pr-sig-block">Date</div></div>';
         document.getElementById('printArea').style.display = 'block';
         window.print();
         setTimeout(function () { document.getElementById('printArea').style.display = 'none'; }, 1500);
@@ -143,7 +143,7 @@ SMC.exporter = (function () {
             ['Compliance', r.compliance], ['Emotional Tone', r.emotionalTone], ['Emotional Management', r.emotionalManagement]
         ]);
         addLong('Observation Remarks', r.observationRemarks);
-        sectionBar('Counselor Notes');
+        sectionBar('Guidance Designate Notes');
         addLong('Student Report', r.studentReport);
         addLong('Actions Taken', r.actionsTaken);
         addLong('Progress Evaluation', r.progressEvaluation);
@@ -154,7 +154,7 @@ SMC.exporter = (function () {
         doc.line(ML, y, ML + 72, y);
         doc.line(PW - MR - 72, y, PW - MR, y);
         setH(7.5, false, 80, 80, 80);
-        doc.text('Guidance Counselor Signature', ML, y + 5);
+        doc.text('Guidance Designate Signature', ML, y + 5);
         doc.text('Date', PW - MR - 72, y + 5);
         var fname = (safeStr(r.name).replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'record') + '_' +
             safeStr(r.grade).replace(/[^a-zA-Z0-9]/g, '_') + '.pdf';

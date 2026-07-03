@@ -41,6 +41,15 @@ function doPost(e) {
             case 'saveReport': return ok(handleSaveReport(requireAuth(session), payload));
             case 'listReports': return ok(handleListReports(requireAdmin(session)));
             case 'setReportStatus': return ok(handleSetReportStatus(requireAdmin(session), payload));
+            case 'listIncidents': return ok(handleListIncidents(requireAuth(session)));
+            case 'saveIncident': return ok(handleSaveIncident(requireAuth(session), payload));
+            case 'deleteIncident': return ok(handleDeleteIncident(requireStaff(session), payload));
+            case 'securityStatus': return ok(handleSecurityStatus());
+            case 'unlockSite': return ok(handleUnlockSite(payload));
+            case 'getSecurity': return ok(handleGetSecurity(requireAdmin(session)));
+            case 'setSecurity': return ok(handleSetSecurity(requireAdmin(session), payload));
+            case 'getClassColors': return ok(handleGetClassColors(session));
+            case 'setClassColor': return ok(handleSetClassColor(requireAuth(session), payload));
             default: return fail('Unknown action.', 'BAD_REQUEST');
         }
     }
@@ -181,6 +190,45 @@ function handleSetReportStatus(session, p) {
     }
     throw httpError('Report not found.', 'NOT_FOUND');
 }
+var CLASSCOLOR_HEADERS = ['key', 'color', 'updatedBy', 'updatedAt'];
+function classColorSheet() { return sheetOrCreate('ClassColors', CLASSCOLOR_HEADERS); }
+function handleGetClassColors(session) {
+    var sh = classColorSheet();
+    var values = sh.getDataRange().getValues();
+    var map = {};
+    for (var r = 1; r < values.length; r++) {
+        var key = String(values[r][0] || '').trim();
+        var color = String(values[r][1] || '').trim();
+        if (key && color) map[key] = color;
+    }
+    return { colors: map };
+}
+function handleSetClassColor(session, p) {
+    var key = String(p && p.key || '').trim().slice(0, 120);
+    var color = String(p && p.color || '').trim().slice(0, 9);
+    if (!key)
+        throw httpError('A colour key is required.', 'BAD_REQUEST');
+    if (color && !/^#[0-9a-fA-F]{6}$/.test(color))
+        throw httpError('Invalid colour.', 'BAD_REQUEST');
+    var sh = classColorSheet();
+    var values = sh.getDataRange().getValues();
+    var now = new Date().toISOString();
+    for (var r = 1; r < values.length; r++) {
+        if (String(values[r][0] || '').trim() === key) {
+            if (color) {
+                sh.getRange(r + 1, 2).setValue(color);
+                sh.getRange(r + 1, 3).setValue(session.username || '');
+                sh.getRange(r + 1, 4).setValue(now);
+            } else {
+                sh.deleteRow(r + 1);
+            }
+            return { key: key, color: color };
+        }
+    }
+    if (color)
+        sh.appendRow([key, color, session.username || '', now]);
+    return { key: key, color: color };
+}
 function doGet() {
     return ContentService.createTextOutput('SMC Guidance API is running.')
         .setMimeType(ContentService.MimeType.TEXT);
@@ -316,11 +364,21 @@ function findUser(username) {
     return null;
 }
 function handleLogin(p) {
+    if (secIsLocked())
+        throw httpError('The website is locked due to suspicious activity. An administrator must unlock it with the unlock code.', 'LOCKED');
     var u = findUser(p.username);
     var candidate = hashPassword(String(p.password || ''), u ? u.salt : 'nosalt');
     if (!u || !constantTimeEquals(candidate, u.hash)) {
-        throw httpError('Incorrect username or password.', 'AUTH');
+        var fails = secFails() + 1;
+        props().setProperty('LOGIN_FAILS', String(fails));
+        if (fails >= secMaxAttempts()) {
+            props().setProperty('SITE_LOCKED', '1');
+            throw httpError('Too many failed attempts. The website is now locked. An administrator must unlock it with the unlock code.', 'LOCKED');
+        }
+        var left = secMaxAttempts() - fails;
+        throw httpError('Incorrect username or password. ' + left + ' attempt' + (left === 1 ? '' : 's') + ' left before the site locks.', 'AUTH');
     }
+    props().setProperty('LOGIN_FAILS', '0');
     var safe = { username: u.username, name: u.name, role: u.role };
     var token = makeToken(safe);
     safe.expiresAt = verifyToken(token).expiresAt;
@@ -1138,4 +1196,136 @@ function writeEvalSummary(cfg, teachers) {
         var secStr = t.sections.map(function (s) { return s.section + ': ' + (s.average == null ? 'n/a' : s.average); }).join(' | ');
         sh.appendRow([cfg.gradeLevel, t.teacher, t.subject, t.docType, t.responses, secStr, t.overall == null ? '' : t.overall, now]);
     });
+}
+
+// ==== Security / site lock (Turn 71) ====
+function secMaxAttempts() { return parseInt(prop('MAX_ATTEMPTS', '10'), 10) || 10; }
+function secFails() { return parseInt(prop('LOGIN_FAILS', '0'), 10) || 0; }
+function secIsLocked() { return prop('SITE_LOCKED', '') === '1'; }
+function secUnlockCode() { var c = prop('UNLOCK_CODE', ''); if (!c) c = prop('REG_CODE', ''); return c; }
+function handleSecurityStatus() { return { locked: secIsLocked() }; }
+function handleUnlockSite(p) {
+    var code = String(p && p.code || '');
+    var expected = secUnlockCode();
+    if (!expected)
+        throw httpError('No unlock code is configured. An administrator must set UNLOCK_CODE (or REG_CODE) in Script Properties.', 'CONFIG');
+    if (!constantTimeEquals(code, expected))
+        throw httpError('Incorrect unlock code.', 'AUTH');
+    props().setProperty('SITE_LOCKED', '');
+    props().setProperty('LOGIN_FAILS', '0');
+    return { unlocked: true };
+}
+function handleGetSecurity(session) {
+    return { locked: secIsLocked(), attempts: secFails(), maxAttempts: secMaxAttempts(), hasUnlockCode: !!prop('UNLOCK_CODE', '') };
+}
+function handleSetSecurity(session, p) {
+    if (p.maxAttempts != null) {
+        var m = parseInt(p.maxAttempts, 10);
+        if (isNaN(m) || m < 1 || m > 1000) throw httpError('Max attempts must be between 1 and 1000.', 'BAD_REQUEST');
+        props().setProperty('MAX_ATTEMPTS', String(m));
+    }
+    if (p.unlockCode != null) {
+        var uc = String(p.unlockCode);
+        if (uc.length < 4) throw httpError('Unlock code must be at least 4 characters.', 'BAD_REQUEST');
+        props().setProperty('UNLOCK_CODE', uc);
+    }
+    if (p.resetAttempts) props().setProperty('LOGIN_FAILS', '0');
+    if (p.lock === true) props().setProperty('SITE_LOCKED', '1');
+    if (p.lock === false) { props().setProperty('SITE_LOCKED', ''); props().setProperty('LOGIN_FAILS', '0'); }
+    return handleGetSecurity(session);
+}
+// ==== Incident reports (Turn 71) ====
+var INCIDENT_HEADERS = ['id', 'title', 'type', 'severity', 'status', 'dateOccurred', 'location', 'involved', 'description', 'actionsTaken', 'reportedBy', 'reporterRole', 'createdAt', 'updatedAt'];
+function incidentSheet() { return sheetOrCreate('Incidents', INCIDENT_HEADERS); }
+function incidentCols(values) {
+    var head = values[0].map(function (h) { return String(h).trim().toLowerCase(); });
+    return {
+        id: head.indexOf('id'), title: head.indexOf('title'), type: head.indexOf('type'),
+        severity: head.indexOf('severity'), status: head.indexOf('status'), dateOccurred: head.indexOf('dateoccurred'),
+        location: head.indexOf('location'), involved: head.indexOf('involved'), description: head.indexOf('description'),
+        actionsTaken: head.indexOf('actionstaken'), reportedBy: head.indexOf('reportedby'), reporterRole: head.indexOf('reporterrole'),
+        createdAt: head.indexOf('createdat'), updatedAt: head.indexOf('updatedat')
+    };
+}
+function incCell(row, idx) { var v = idx >= 0 ? row[idx] : ''; if (v == null) return ''; return (v instanceof Date) ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm') : String(v); }
+function normInvolved(raw) {
+    var arr = raw;
+    if (typeof arr === 'string') { try { arr = JSON.parse(arr || '[]'); } catch (e) { arr = []; } }
+    if (!Array.isArray(arr)) arr = [];
+    return arr.map(function (p) { p = p || {}; return { name: String(p.name || '').slice(0, 120), grade: String(p.grade || '').slice(0, 40), section: String(p.section || '').slice(0, 40), role: String(p.role || '').slice(0, 40) }; })
+        .filter(function (p) { return p.name || p.grade || p.section; });
+}
+function incToObj(row, c) {
+    var involved = [];
+    try { involved = JSON.parse(incCell(row, c.involved) || '[]'); } catch (e) { involved = []; }
+    return {
+        id: incCell(row, c.id), title: incCell(row, c.title), type: incCell(row, c.type), severity: incCell(row, c.severity),
+        status: incCell(row, c.status) || 'Open', dateOccurred: incCell(row, c.dateOccurred), location: incCell(row, c.location),
+        involved: involved, description: incCell(row, c.description), actionsTaken: incCell(row, c.actionsTaken),
+        reportedBy: incCell(row, c.reportedBy), reporterRole: incCell(row, c.reporterRole),
+        createdAt: incCell(row, c.createdAt), updatedAt: incCell(row, c.updatedAt)
+    };
+}
+function incMine(session, reportedBy) {
+    var rb = String(reportedBy || '').toLowerCase();
+    var keys = [String(session.name || '').toLowerCase(), String(session.username || '').toLowerCase()];
+    return keys.some(function (k) { return k && rb.indexOf(k) !== -1; });
+}
+function handleListIncidents(session) {
+    var sh = incidentSheet();
+    var values = sh.getDataRange().getValues();
+    if (values.length < 2) return [];
+    var c = incidentCols(values); var out = [];
+    for (var r = 1; r < values.length; r++) {
+        var row = values[r];
+        if (c.id >= 0 && !String(row[c.id]).trim()) continue;
+        out.push(incToObj(row, c));
+    }
+    if (!isStaffRole(session.role)) out = out.filter(function (o) { return incMine(session, o.reportedBy); });
+    out.sort(function (a, b) { return (a.createdAt < b.createdAt) ? 1 : -1; });
+    return out;
+}
+function handleSaveIncident(session, p) {
+    var sh = incidentSheet();
+    var values = sh.getDataRange().getValues();
+    var c = incidentCols(values); var width = values[0].length;
+    var now = new Date();
+    var nowStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+    if (!String(p.title || '').trim()) throw httpError('An incident title is required.', 'BAD_REQUEST');
+    var involvedJson = JSON.stringify(normInvolved(p.involved));
+    var id = String(p.id || '').trim();
+    if (!id) {
+        var newId = 'IN' + now.getTime();
+        var row = [];
+        for (var i = 0; i < width; i++) row[i] = '';
+        var setNew = function (idx, val) { if (idx >= 0) row[idx] = val == null ? '' : val; };
+        setNew(c.id, newId); setNew(c.title, String(p.title).slice(0, 200)); setNew(c.type, String(p.type || '').slice(0, 80));
+        setNew(c.severity, String(p.severity || '').slice(0, 40)); setNew(c.status, String(p.status || 'Open').slice(0, 40));
+        setNew(c.dateOccurred, String(p.dateOccurred || '').slice(0, 40)); setNew(c.location, String(p.location || '').slice(0, 200));
+        setNew(c.involved, involvedJson); setNew(c.description, String(p.description || '').slice(0, 8000));
+        setNew(c.actionsTaken, String(p.actionsTaken || '').slice(0, 8000)); setNew(c.reportedBy, session.name || session.username);
+        setNew(c.reporterRole, session.role || ''); setNew(c.createdAt, nowStr); setNew(c.updatedAt, nowStr);
+        sh.appendRow(row);
+        return { id: newId };
+    }
+    var target = -1;
+    for (var rr = 1; rr < values.length; rr++) { if (String(values[rr][c.id]).trim() === id) { target = rr + 1; break; } }
+    if (target < 0) throw httpError('Incident not found.', 'NOT_FOUND');
+    if (!isStaffRole(session.role) && !incMine(session, values[target - 1][c.reportedBy]))
+        throw httpError('You can only edit incident reports you created.', 'FORBIDDEN');
+    var upd = function (idx, val) { if (idx >= 0) sh.getRange(target, idx + 1).setValue(val == null ? '' : val); };
+    upd(c.title, String(p.title).slice(0, 200)); upd(c.type, String(p.type || '').slice(0, 80)); upd(c.severity, String(p.severity || '').slice(0, 40));
+    upd(c.status, String(p.status || 'Open').slice(0, 40)); upd(c.dateOccurred, String(p.dateOccurred || '').slice(0, 40));
+    upd(c.location, String(p.location || '').slice(0, 200)); upd(c.involved, involvedJson); upd(c.description, String(p.description || '').slice(0, 8000));
+    upd(c.actionsTaken, String(p.actionsTaken || '').slice(0, 8000)); upd(c.updatedAt, nowStr);
+    return { id: id };
+}
+function handleDeleteIncident(session, p) {
+    var id = String(p.id || '').trim();
+    if (!id) throw httpError('Incident id required.', 'BAD_REQUEST');
+    var sh = incidentSheet();
+    var values = sh.getDataRange().getValues();
+    var c = incidentCols(values);
+    for (var r = 1; r < values.length; r++) { if (String(values[r][c.id]).trim() === id) { sh.deleteRow(r + 1); return { removed: true }; } }
+    throw httpError('Incident not found.', 'NOT_FOUND');
 }

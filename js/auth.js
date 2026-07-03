@@ -27,11 +27,17 @@ SMC.auth = (function () {
             btn.disabled = false;
             btn.textContent = 'Sign In';
             document.getElementById('liPass').value = '';
+            if (d.user && d.user.role === 'admin') {
+                api.clearToken();
+                ui.showErr(err, 'Administrator sign-in is disabled here. Please use the Command Center to access the admin section.');
+                return;
+            }
             SMC.app.boot(d.user);
         }).catch(function (e) {
             btn.disabled = false;
             btn.textContent = 'Sign In';
             document.getElementById('liPass').value = '';
+            if (e.code === 'LOCKED' && SMC.app && SMC.app.showLock) SMC.app.showLock();
             ui.showErr(err, e.message || 'Incorrect username or password.');
         });
     }

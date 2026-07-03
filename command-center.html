@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMC Guidance &mdash; Command Center</title>
+<style>
+:root{--navy:#002B6B;--gold:#BFA050;--bg:#0b1220;--panel:#111a2c;--line:#24324a;--ink:#e6eefb;--muted:#93a4bf;--ok:#57e08a;--err:#ff7b72}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:radial-gradient(1200px 600px at 50% -10%,#13233f,#0b1220);color:var(--ink);font-family:'SF Mono',Menlo,Consolas,monospace;display:flex;align-items:center;justify-content:center;padding:20px}
+.wrap{width:100%;max-width:720px}
+.brand{text-align:center;margin-bottom:16px}
+.brand h1{margin:0;font-size:1.15rem;color:#fff;letter-spacing:1px}
+.brand p{margin:4px 0 0;color:var(--muted);font-size:.8rem}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 26px 70px rgba(0,0,0,.6)}
+.top{display:flex;align-items:center;gap:7px;padding:10px 14px;background:#0d1526;border-bottom:1px solid var(--line)}
+.dot{width:11px;height:11px;border-radius:50%}
+.dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
+.title{color:var(--muted);font-size:.82rem;margin-left:6px}
+.out{height:360px;overflow-y:auto;padding:14px;font-size:.84rem;line-height:1.55}
+.row{white-space:pre-wrap;word-break:break-word}
+.row.echo{color:#7fd1ff}.row.ok{color:var(--ok)}.row.err{color:var(--err)}.row.sys{color:var(--muted)}
+.line{display:flex;align-items:center;gap:8px;padding:11px 14px;border-top:1px solid var(--line);background:#0d1526}
+.ps{color:var(--ok);font-weight:700}
+#in{flex:1;background:none;border:none;outline:none;color:var(--ink);font-family:inherit;font-size:.92rem}
+.cfg{margin-top:12px;text-align:center;color:var(--muted);font-size:.72rem}
+.cfg input{background:#0d1526;border:1px solid var(--line);border-radius:6px;color:var(--ink);padding:5px 8px;font-family:inherit;font-size:.72rem;width:min(520px,90%)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="brand"><h1>STELLA MARIS COLLEGE &middot; GUIDANCE</h1><p>Admin Command Center &mdash; standalone console</p></div>
+<div class="box">
+<div class="top"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">command-center</span></div>
+<div class="out" id="out"></div>
+<div class="line"><span class="ps">&gt;</span><input id="in" autocomplete="off" spellcheck="false" placeholder="type a command &mdash; try: help"></div>
+</div>
+<div class="cfg">API endpoint: <input id="api" value="https://script.google.com/macros/s/AKfycbxau7UBX__qbvrM8RTq2iy4ZmDeypCD2tkY9iFk37P0OJszqUrSjW1B1lki5SWK15j8/exec"></div>
+</div>
+<script>
+var TOKEN = null, USER = null;
+var out = document.getElementById('out'), inp = document.getElementById('in');
+function line(t, c){ var d = document.createElement('div'); d.className = 'row' + (c ? ' ' + c : ''); d.textContent = t; out.appendChild(d); out.scrollTop = out.scrollHeight; }
+function apiUrl(){ return document.getElementById('api').value.trim(); }
+function call(action, payload){
+  return fetch(apiUrl(), { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ action: action, token: TOKEN, payload: payload || {} }) })
+    .then(function(r){ return r.json(); })
+    .then(function(res){ if(res && res.ok === false){ var e = new Error(res.error || 'Request failed'); e.code = res.code; throw e; } return res.data; });
+}
+function help(){
+  ['Available commands:',
+   '  help                 show this help',
+   '  status               show site lock + security status',
+   '  whoami               show the signed-in account',
+   '  login <user> <pass>  sign in as an administrator',
+   '  unlock <code>        lift a site lock with the unlock code',
+   '  lock                 (admin) lock the whole website',
+   '  setmax <n>           (admin) set max failed-login attempts',
+   '  setcode <code>       (admin) set the site unlock code',
+   '  resetattempts        (admin) reset the failed-login counter',
+   '  incidents            (admin) list incident report titles',
+   '  logout               sign out',
+   '  clear                clear the console'
+  ].forEach(function(t){ line(t, 'sys'); });
+}
+function run(raw){
+  var v = (raw || '').trim(); if(!v) return;
+  line('> ' + v, 'echo');
+  var parts = v.split(/\s+/), cmd = parts[0].toLowerCase(), a = parts.slice(1);
+  if(cmd === 'help') return help();
+  if(cmd === 'clear'){ out.innerHTML = ''; return; }
+  if(cmd === 'whoami') return line(USER ? (USER.name + ' (' + USER.role + ')') : 'Not signed in.', 'sys');
+  if(cmd === 'status'){
+    call('securityStatus').then(function(s){ line('Site locked: ' + (s.locked ? 'YES' : 'no'), s.locked ? 'err' : 'ok');
+      if(USER && USER.role === 'admin') call('getSecurity').then(function(d){ line('Failed attempts: ' + d.attempts + ' / ' + d.maxAttempts, 'sys'); line('Custom unlock code set: ' + (d.hasUnlockCode ? 'yes' : 'no (falls back to registration code)'), 'sys'); }).catch(function(){});
+    }).catch(function(e){ line(e.message, 'err'); });
+    return;
+  }
+  if(cmd === 'login'){
+    if(a.length < 2) return line('Usage: login <username> <password>', 'err');
+    call('login', { username: a[0], password: a.slice(1).join(' ') }).then(function(d){ TOKEN = d.token; USER = d.user; line('Welcome, ' + d.user.name + ' (' + d.user.role + ').', 'ok'); }).catch(function(e){ line(e.message, 'err'); });
+    return;
+  }
+  if(cmd === 'unlock'){ if(!a.length) return line('Usage: unlock <code>', 'err'); call('unlockSite', { code: a.join(' ') }).then(function(){ line('Website unlocked.', 'ok'); }).catch(function(e){ line(e.message, 'err'); }); return; }
+  if(cmd === 'lock'){ call('setSecurity', { lock: true }).then(function(){ line('Website locked.', 'ok'); }).catch(function(e){ line(e.message, 'err'); }); return; }
+  if(cmd === 'setmax'){ var n = parseInt(a[0], 10); if(isNaN(n)) return line('Usage: setmax <number>', 'err'); call('setSecurity', { maxAttempts: n }).then(function(d){ line('Max attempts set to ' + d.maxAttempts + '.', 'ok'); }).catch(function(e){ line(e.message, 'err'); }); return; }
+  if(cmd === 'setcode'){ if(!a.length) return line('Usage: setcode <newcode>', 'err'); call('setSecurity', { unlockCode: a.join(' ') }).then(function(){ line('Unlock code updated.', 'ok'); }).catch(function(e){ line(e.message, 'err'); }); return; }
+  if(cmd === 'resetattempts'){ call('setSecurity', { resetAttempts: true }).then(function(){ line('Counter reset.', 'ok'); }).catch(function(e){ line(e.message, 'err'); }); return; }
+  if(cmd === 'incidents'){ call('listIncidents').then(function(rows){ if(!rows.length) return line('No incident reports.', 'sys'); rows.forEach(function(r){ line('  ' + r.id + '  [' + (r.status || 'Open') + ']  ' + (r.title || ''), 'sys'); }); }).catch(function(e){ line(e.message, 'err'); }); return; }
+  if(cmd === 'logout'){ TOKEN = null; USER = null; line('Signed out.', 'sys'); return; }
+  line('Unknown command: ' + cmd + '  (type help)', 'err');
+}
+inp.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ var v = inp.value; inp.value = ''; run(v); } });
+line('SMC Admin Command Center ready. Type help for commands.', 'sys');
+inp.focus();
+</script>
+</body>
+</html>

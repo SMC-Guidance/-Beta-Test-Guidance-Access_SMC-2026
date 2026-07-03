@@ -91,7 +91,7 @@ SMC.profile = (function () {
                 (photo ? '<button class="mbtn mbtn-cl" id="pfClear">Remove</button>' : '') +
                 '</div></div>' +
                 '<div class="fg"><label for="pfName">Display name</label><input type="text" id="pfName" value="' + esc((current && current.name) || '') + '" placeholder="Your name"></div>' +
-                '<div class="fg"><label for="pfRole">Role / title</label><input type="text" id="pfRole" value="' + esc((current && current.role) || '') + '" placeholder="e.g. Guidance Counselor"></div>' +
+                '<div class="fg"><label for="pfRole">Role / title</label><input type="text" id="pfRole" value="' + esc((current && current.role) || '') + '" placeholder="e.g. Guidance Designate"></div>' +
                 '<div class="fg"><label for="pfNotes">Notes</label><textarea id="pfNotes" rows="6" placeholder="Notes, reminders, links...">' + esc((current && current.notes) || '') + '</textarea></div>' +
                 '<div class="pf-actbar"><button class="mbtn mbtn-pr" id="pfSave">Save profile</button><span class="pf-saved" id="pfSaved"></span></div>' +
                 '</div></div>' +

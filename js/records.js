@@ -169,7 +169,7 @@ SMC.records = (function () {
                     mf('Compliance', r.compliance), mf('Emotional Tone', r.emotionalTone), mf('Emotional Management', r.emotionalManagement),
                     mfl('Observation Remarks', r.observationRemarks)
                 ])) +
-                msec('Counselor Notes', mgrid([mfl('Student Report', r.studentReport), mfl('Actions Taken', r.actionsTaken), mfl('Progress Evaluation', r.progressEvaluation)]));
+                msec('Guidance Designate Notes', mgrid([mfl('Student Report', r.studentReport), mfl('Actions Taken', r.actionsTaken), mfl('Progress Evaluation', r.progressEvaluation)]));
         document.getElementById('viewModal').classList.add('open');
         document.getElementById('mCloseBtn').focus();
         document.body.style.overflow = 'hidden';

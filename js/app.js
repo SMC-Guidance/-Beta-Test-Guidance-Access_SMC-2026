@@ -10,12 +10,14 @@ SMC.app = (function () {
     }
     var VIEW_META = {
         dashboard: { el: 'dashView', nav: 'navDash', title: 'Dashboard', sub: 'Stella Maris College \u00b7 Guidance Office' },
-        counselors: { el: 'counselorsView', nav: 'navCounselors', title: 'Staff & Counselors', sub: 'Manage accounts and access levels' },
+        counselors: { el: 'counselorsView', nav: 'navCounselors', title: 'Staff & Guidance Designates', sub: 'Manage accounts and access levels' },
         evaluations: { el: 'evalView', nav: 'navEval', title: 'Teacher Evaluations', sub: 'Track evaluation tasks and cross-checking' },
         procedures: { el: 'proceduresView', nav: 'navProcedures', title: 'Assessment Procedures', sub: 'Reference for student & teacher applicants' },
         evalResults: { el: 'evalProcView', nav: 'navEvalProc', title: 'Evaluation Results', sub: 'Compute & summarize teacher evaluations' },
         profile: { el: 'profileView', nav: 'navProfile', title: 'My Profile', sub: 'Your photo, notes & profile guide' },
-        evalDash: { el: 'evalDashView', nav: 'navEvalDash', title: 'Eval Dashboard', sub: 'Results overview — teachers, averages, sections' }
+        evalDash: { el: 'evalDashView', nav: 'navEvalDash', title: 'Evaluation Dashboard', sub: 'Results overview — teachers, averages, sections' },
+        incidents: { el: 'incidentsView', nav: 'navIncidents', title: 'Incident Reports', sub: 'Log, view, print & manage incident reports' },
+        classlists: { el: 'classListsView', nav: 'navClassLists', title: 'Class Lists', sub: 'Official class lists by year level \u00b7 SY 2026-2027' }
     };
     function isAdminUser() { return !!(user && user.role === 'admin'); }
     function maintHost() { return document.querySelector('.main') || document.body; }
@@ -60,7 +62,7 @@ SMC.app = (function () {
             v = 'dashboard';
         currentView = v;
         updateSearchVisibility();
-        document.querySelectorAll('.sbi').forEach(function (b) { b.classList.remove('on'); });
+        document.querySelectorAll('.sbi, .sbsubi').forEach(function (b) { b.classList.remove('on'); });
         var nav = document.getElementById(VIEW_META[v].nav);
         if (nav)
             nav.classList.add('on');
@@ -94,6 +96,10 @@ SMC.app = (function () {
             SMC.profile.render();
         if (v === 'evalDash' && SMC.evalDash)
             SMC.evalDash.render();
+        if (v === 'incidents' && SMC.incidents)
+            SMC.incidents.render();
+        if (v === 'classlists' && SMC.classlists)
+            SMC.classlists.render();
     }
     function updateMaintBtn() {
         var btn = document.getElementById('maintBtn');
@@ -212,7 +218,7 @@ SMC.app = (function () {
                     '<td style="color:var(--mist);font-size:11px">' + (i + 1) + '</td>' +
                     '<td style="font-weight:500">' + ui.esc(u.name) + '</td>' +
                     '<td style="color:var(--mist)">' + ui.esc(u.username) + '</td>' +
-                    '<td><span class="rpill ' + roleCls + '">' + ui.esc(u.role) + '</span></td>' +
+                    '<td><span class="rpill ' + roleCls + '">' + ui.esc(u.role === 'counselor' ? 'guidance designate' : u.role) + '</span></td>' +
                     '<td><div class="action-col" style="display:flex;gap:4px;flex-wrap:wrap">' + roleBtn + delBtn + '</div></td></tr>';
             });
             tb.innerHTML = html || '<tr><td colspan="5" style="text-align:center;color:var(--mist);padding:20px">No accounts found.</td></tr>';
@@ -274,7 +280,7 @@ SMC.app = (function () {
         var pmRoleEl = document.getElementById('pmRole'); if (pmRoleEl) pmRoleEl.textContent = u.role;
         var staff = u.role === 'admin' || u.role === 'co-admin';
         document.getElementById('navCounselors').style.display = staff ? '' : 'none';
-        document.getElementById('navEval').style.display = '';
+        var neg = document.getElementById('navEvalGroup'); if (neg) neg.style.display = '';
         document.getElementById('navProcedures').style.display = '';
         document.getElementById('navEvalProc').style.display = '';
         var np = document.getElementById('navProfile');
@@ -287,9 +293,13 @@ SMC.app = (function () {
         loadMaintenance();
         SMC.evaluations.refreshChrome();
         if (SMC.settings && SMC.settings.setUser) SMC.settings.setUser(u);
+        if (SMC.incidents && SMC.incidents.setUser) SMC.incidents.setUser(u);
+        if (SMC.classlists && SMC.classlists.setUser) SMC.classlists.setUser(u);
+        window.__smcUser = u;
         startTimers(u.expiresAt);
         showScreen('appScreen');
         showView('dashboard');
+        maybeShowWhatsNew();
         loadData();
         refreshEvalStats();
         updateSearchVisibility();
@@ -309,6 +319,7 @@ SMC.app = (function () {
     }
     function reset() {
         user = null;
+        window.__smcUser = null;
         clearTimers();
         SMC.charts.destroy();
     }
@@ -319,10 +330,20 @@ SMC.app = (function () {
         SMC.evaluations.bind();
         if (SMC.settings && SMC.settings.bind) SMC.settings.bind();
         document.getElementById('navDash').addEventListener('click', function () { showView('dashboard'); });
+        var navHome = document.getElementById('navHome');
+        if (navHome) navHome.addEventListener('click', function () { showView('dashboard'); if (window.innerWidth <= 768) closeSidebar(); });
+        setupWhatsNew();
         document.getElementById('navCounselors').addEventListener('click', function () { showView('counselors'); });
         document.getElementById('navEval').addEventListener('click', function () { showView('evaluations'); });
         document.getElementById('navProcedures').addEventListener('click', function () { showView('procedures'); });
         document.getElementById('navEvalProc').addEventListener('click', function () { showView('evalResults'); });
+        (function () {
+            var grp = document.getElementById('navEvalGroup');
+            if (!grp) return;
+            var closeT;
+            grp.addEventListener('mouseenter', function () { clearTimeout(closeT); grp.classList.add('open'); });
+            grp.addEventListener('mouseleave', function () { closeT = setTimeout(function () { grp.classList.remove('open'); }, 160); });
+        })();
         (function () {
             var pm = document.getElementById('profileMenu');
             var pb = document.getElementById('profileBtn');
@@ -357,6 +378,33 @@ SMC.app = (function () {
             document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && tut.classList.contains('on')) closeTut(); });
         })();
         document.getElementById('navEvalDash').addEventListener('click', function () { showView('evalDash'); });
+        var dashInc = document.getElementById('dashIncidentsBtn');
+        if (dashInc) dashInc.addEventListener('click', function () { showView('incidents'); });
+        setupDashStudentSearch();
+        var navCl = document.getElementById('navClassLists');
+        if (navCl) navCl.addEventListener('click', function () { showView('classlists'); });
+        if (SMC.cmd && SMC.cmd.init) SMC.cmd.init();
+        (function () {
+            var lb = document.getElementById('lockUnlockBtn');
+            if (!lb) return;
+            lb.addEventListener('click', function () {
+                var code = document.getElementById('lockCode').value;
+                var lerr = document.getElementById('lockErr');
+                lerr.classList.remove('on');
+                lb.disabled = true; lb.textContent = 'Unlocking…';
+                api.unlockSite(code).then(function () {
+                    lb.disabled = false; lb.textContent = 'Unlock Website';
+                    document.getElementById('lockCode').value = '';
+                    hideLock(); ui.toast('Website unlocked.', 'ok');
+                }).catch(function (e) {
+                    lb.disabled = false; lb.textContent = 'Unlock Website';
+                    ui.showErr(lerr, e.message || 'Unlock failed.');
+                });
+            });
+            var lc = document.getElementById('lockCode');
+            if (lc) lc.addEventListener('keydown', function (e) { if (e.key === 'Enter') lb.click(); });
+        })();
+        checkLock();
         var mb = document.getElementById('maintBtn');
         if (mb)
             mb.addEventListener('click', toggleMaintenance);
@@ -420,6 +468,147 @@ SMC.app = (function () {
         if (pm)
             pm.classList.remove('open');
     }
-    return { init: init, boot: boot, reset: reset, showScreen: showScreen, refreshEvalStats: refreshEvalStats, showTutorial: showTutorial };
+    function showLock() { var o = document.getElementById('lockOverlay'); if (o) { o.classList.add('on'); o.setAttribute('aria-hidden', 'false'); } }
+    function hideLock() { var o = document.getElementById('lockOverlay'); if (o) { o.classList.remove('on'); o.setAttribute('aria-hidden', 'true'); } }
+    function checkLock() { if (!api.securityStatus) return; api.securityStatus().then(function (s) { if (s && s.locked) showLock(); else hideLock(); }).catch(function () { }); }
+    function setupDashClassDropdown() {
+        var btn = document.getElementById('dashClassListsBtn');
+        var menu = document.getElementById('dashClMenu');
+        if (!btn || !menu || !SMC.classlists || !SMC.classlists.listSections) return;
+        function esc(s) { return (ui && ui.esc) ? ui.esc(s) : String(s == null ? '' : s); }
+        var built = false;
+        function build() {
+            if (built) return; built = true;
+            var byLvl = {}; var order = [];
+            SMC.classlists.listSections().forEach(function (s) { if (!byLvl[s.level]) { byLvl[s.level] = []; order.push(s.level); } byLvl[s.level].push(s); });
+            menu.innerHTML = order.map(function (lvl) {
+                return '<div class="dcm-grp">' + esc(lvl) + '</div>' + byLvl[lvl].map(function (s) {
+                    return '<button type="button" class="dcm-item" data-key="' + esc(s.key) + '"><span class="dcm-sec">' + esc(s.section) + '</span><span class="dcm-mt">' + esc((s.adviser || '\u2014') + ' \u00b7 ' + s.count) + '</span></button>';
+                }).join('');
+            }).join('');
+        }
+        function openM() { build(); menu.classList.add('on'); btn.setAttribute('aria-expanded', 'true'); }
+        function closeM() { menu.classList.remove('on'); btn.setAttribute('aria-expanded', 'false'); }
+        btn.addEventListener('click', function (e) { e.stopPropagation(); if (menu.classList.contains('on')) closeM(); else openM(); });
+        menu.addEventListener('click', function (e) {
+            var b = e.target.closest('[data-key]'); if (!b) return;
+            closeM(); showView('classlists');
+            if (SMC.classlists.openSection) SMC.classlists.openSection(b.getAttribute('data-key'));
+        });
+        document.addEventListener('click', function (e) { if (!menu.contains(e.target) && !btn.contains(e.target)) closeM(); });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeM(); });
+    }
+    function setupDashStudentSearch() {
+        var inp = document.getElementById('dashClStudent');
+        var box = document.getElementById('dashClResults');
+        if (!inp || !box || !SMC.classlists || !SMC.classlists.searchStudents) return;
+        function esc(s) { return (ui && ui.esc) ? ui.esc(s) : String(s == null ? '' : s); }
+        function close() { box.classList.remove('on'); box.innerHTML = ''; }
+        inp.addEventListener('input', function () {
+            var q = this.value.trim();
+            if (q.length < 2) { close(); return; }
+            var list = SMC.classlists.searchStudents(q).slice(0, 8);
+            if (!list.length) { box.innerHTML = '<div class="dcr-empty">No student found</div>'; box.classList.add('on'); return; }
+            box.innerHTML = list.map(function (s) {
+                return '<button type="button" class="dcr-item" data-lrn="' + esc(s.lrn) + '"><span class="dcr-nm">' + esc(s.name) + '</span><span class="dcr-mt">' + esc(s.level + ' \u00b7 ' + s.section + ' \u00b7 ' + s.lrn) + '</span></button>';
+            }).join('');
+            box.classList.add('on');
+        });
+        box.addEventListener('click', function (e) {
+            var b = e.target.closest('[data-lrn]');
+            if (!b) return;
+            showView('classlists');
+            if (SMC.classlists.openStudent) SMC.classlists.openStudent(b.getAttribute('data-lrn'));
+            inp.value = ''; close();
+        });
+        inp.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+        document.addEventListener('click', function (e) { if (e.target !== inp && !box.contains(e.target)) close(); });
+    }
+    var wnOpen = null, wnIntroOpen = null;
+    function setupWhatsNew() {
+        var ov = document.getElementById('tour');
+        if (!ov) return;
+        var hole = document.getElementById('tourHole');
+        var pop = document.getElementById('tourPop');
+        var icE = document.getElementById('tourIc');
+        var tE = document.getElementById('tourT');
+        var dE = document.getElementById('tourD');
+        var dots = document.getElementById('tourDots');
+        var back = document.getElementById('tourBack');
+        var next = document.getElementById('tourNext');
+        var xB = document.getElementById('tourX');
+        if (!hole || !pop || !back || !next) return;
+        var steps = [
+            { sel: '#navHome', ic: '\uD83C\uDFE0', t: 'Home button', d: 'Click the school logo anytime to jump back to the Dashboard.' },
+            { sel: '#navEvalGroup', ic: '\uD83E\uDDED', t: 'Teachers Evaluation', d: 'Open Teachers Evaluation to reveal Evaluation Dashboard and Evaluation results in a compact dropdown.', open: true },
+            { sel: '#dashClStudent', ic: '\uD83D\uDD0E', t: 'Find a student', d: 'Search any student by name or Student Number and jump straight to their class record.', view: 'dashboard' },
+            { sel: '#navClassLists', ic: '\uD83D\uDCCB', t: 'Class Lists', d: 'Browse every section by year level, now shown as clean, colour-coded lines you can customise.' },
+            { sel: '#dashIncidentsBtn', ic: '\u26A0\uFE0F', t: 'Incident Reports', d: 'File and review incident reports quickly from the Dashboard.', view: 'dashboard' },
+            { sel: '#profileBtn', ic: '\uD83C\uDF19', t: 'Navy-blue dark mode', d: 'Open this menu and choose Settings to switch on the new navy-blue dark mode \u2014 tuned for comfortable, high-contrast reading at night.' },
+            { sel: null, ic: '\uD83D\uDD04', t: 'Always up to date', d: 'The app now updates itself automatically, so you always have the latest version. Enjoy!' }
+        ];
+        var i = 0;
+        function clearOpen() { var g = document.getElementById('navEvalGroup'); if (g) g.classList.remove('open'); }
+        function place() {
+            var s = steps[i];
+            icE.textContent = s.ic; tE.textContent = s.t; dE.textContent = s.d;
+            dots.innerHTML = steps.map(function (_, k) { return '<span class="wn-dot' + (k === i ? ' on' : '') + '"></span>'; }).join('');
+            back.style.visibility = i === 0 ? 'hidden' : 'visible';
+            next.textContent = i === steps.length - 1 ? 'Done' : 'Next';
+            clearOpen();
+            if (s.open) { var g = document.getElementById('navEvalGroup'); if (g) g.classList.add('open'); }
+            var el = s.sel ? document.querySelector(s.sel) : null;
+            var rect = el ? el.getBoundingClientRect() : null;
+            var pw = Math.min(300, window.innerWidth - 24);
+            if (rect && rect.width > 0 && rect.height > 0) {
+                var pad = 8;
+                hole.style.display = 'block';
+                hole.style.top = (rect.top - pad) + 'px';
+                hole.style.left = (rect.left - pad) + 'px';
+                hole.style.width = (rect.width + pad * 2) + 'px';
+                hole.style.height = (rect.height + pad * 2) + 'px';
+                var ph = pop.offsetHeight || 190;
+                var top = rect.bottom + 14, left = rect.left;
+                if (top + ph > window.innerHeight - 10) top = rect.top - ph - 14;
+                if (top < 10) top = 10;
+                left = Math.max(12, Math.min(left, window.innerWidth - pw - 12));
+                pop.style.top = top + 'px'; pop.style.left = left + 'px';
+            } else {
+                hole.style.display = 'none';
+                pop.style.top = Math.max(10, (window.innerHeight - (pop.offsetHeight || 200)) / 2) + 'px';
+                pop.style.left = Math.max(12, (window.innerWidth - pw) / 2) + 'px';
+            }
+        }
+        function render() {
+            var v = steps[i].view;
+            if (v) showView(v);
+            setTimeout(place, v ? 130 : 0);
+        }
+        function markSeen() { try { localStorage.setItem('smc-whatsnew-2026-07e', '1'); } catch (e) { } }
+        function close() { ov.classList.remove('on'); ov.setAttribute('aria-hidden', 'true'); clearOpen(); markSeen(); window.removeEventListener('resize', place); }
+        back.addEventListener('click', function () { if (i > 0) { i--; render(); } });
+        next.addEventListener('click', function () { if (i < steps.length - 1) { i++; render(); } else close(); });
+        if (xB) xB.addEventListener('click', close);
+        wnOpen = function () { i = 0; ov.classList.add('on'); ov.setAttribute('aria-hidden', 'false'); render(); window.addEventListener('resize', place); };
+        var intro = document.getElementById('wnIntro');
+        if (intro) {
+            var startB = document.getElementById('wnIntroStart');
+            var skipB = document.getElementById('wnIntroSkip');
+            var introX = document.getElementById('wnIntroX');
+            var introClose = function (seen) { intro.classList.remove('on'); intro.setAttribute('aria-hidden', 'true'); if (seen) markSeen(); };
+            if (startB) startB.addEventListener('click', function () { introClose(false); wnOpen(); });
+            if (skipB) skipB.addEventListener('click', function () { introClose(true); });
+            if (introX) introX.addEventListener('click', function () { introClose(true); });
+            wnIntroOpen = function () { intro.classList.add('on'); intro.setAttribute('aria-hidden', 'false'); };
+        }
+        var reopen = document.getElementById('wnReopen');
+        if (reopen) reopen.addEventListener('click', function () { if (wnIntroOpen) wnIntroOpen(); else if (wnOpen) wnOpen(); });
+    }
+    function maybeShowWhatsNew() {
+        try { if (localStorage.getItem('smc-whatsnew-2026-07e')) return; } catch (e) { }
+        if (wnIntroOpen) setTimeout(wnIntroOpen, 700);
+        else if (wnOpen) setTimeout(wnOpen, 700);
+    }
+    return { init: init, boot: boot, reset: reset, showScreen: showScreen, refreshEvalStats: refreshEvalStats, showTutorial: showTutorial, go: function (v) { showView(v); }, showLock: showLock, hideLock: hideLock, checkLock: checkLock };
 })();
 window.addEventListener('DOMContentLoaded', SMC.app.init);
