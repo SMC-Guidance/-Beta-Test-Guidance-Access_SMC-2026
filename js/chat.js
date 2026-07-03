@@ -66,8 +66,11 @@ SMC.chat = (function () {
 
     function renderList() {
         var list = el('chatList'); if (!list) return;
-        if (!contacts.length) { list.innerHTML = '<div class="chat-empty">No other staff members yet.</div>'; return; }
-        var h = '';
+        var meName = (user && (user.name || user.username)) || 'You';
+        var meInitial = String(meName || '?').charAt(0).toUpperCase();
+        var selfRow = '<div class="chat-self"><span class="chat-av">' + esc(meInitial) + '<span class="chat-dot on"></span></span><span class="chat-ci-main"><span class="chat-ci-top"><strong>' + esc(meName) + ' (you)</strong></span><span class="chat-ci-sub">Active now</span></span></div>';
+        if (!contacts.length) { list.innerHTML = selfRow + '<div class="chat-empty">No other staff members are online yet. Active status and chats appear here when another admin or co-admin opens the app.</div>'; return; }
+        var h = selfRow + '<div class="chat-sec-label">Staff</div>';
         for (var i = 0; i < contacts.length; i++) {
             var c = contacts[i];
             var initial = (c.name || c.username || '?').charAt(0).toUpperCase();
