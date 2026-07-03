@@ -586,7 +586,7 @@ SMC.app = (function () {
             if (v) showView(v);
             setTimeout(place, v ? 130 : 0);
         }
-        function markSeen() { try { localStorage.setItem('smc-whatsnew-2026-07f', '1'); } catch (e) { } }
+        function markSeen() { try { localStorage.setItem('smc-whatsnew-2026-07g', '1'); } catch (e) { } }
         function close() { ov.classList.remove('on'); ov.setAttribute('aria-hidden', 'true'); clearOpen(); markSeen(); window.removeEventListener('resize', place); }
         back.addEventListener('click', function () { if (i > 0) { i--; render(); } });
         next.addEventListener('click', function () { if (i < steps.length - 1) { i++; render(); } else close(); });
@@ -607,7 +607,7 @@ SMC.app = (function () {
         if (reopen) reopen.addEventListener('click', function () { if (wnIntroOpen) wnIntroOpen(); else if (wnOpen) wnOpen(); });
     }
     function maybeShowWhatsNew() {
-        try { if (localStorage.getItem('smc-whatsnew-2026-07f')) return; } catch (e) { }
+        try { if (localStorage.getItem('smc-whatsnew-2026-07g')) return; } catch (e) { }
         if (wnIntroOpen) setTimeout(wnIntroOpen, 700);
         else if (wnOpen) setTimeout(wnOpen, 700);
     }

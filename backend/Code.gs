@@ -50,9 +50,10 @@ function doPost(e) {
             case 'setSecurity': return ok(handleSetSecurity(requireAdmin(session), payload));
             case 'getClassColors': return ok(handleGetClassColors(session));
             case 'setClassColor': return ok(handleSetClassColor(requireAuth(session), payload));
-            case 'chatPoll': return ok(handleChatPoll(requireStaff(session)));
-            case 'getThread': return ok(handleGetThread(requireStaff(session), payload));
-            case 'sendMessage': return ok(handleSendMessage(requireStaff(session), payload));
+            case 'chatPoll': return ok(handleChatPoll(requireAuth(session)));
+            case 'getThread': return ok(handleGetThread(requireAuth(session), payload));
+            case 'sendMessage': return ok(handleSendMessage(requireAuth(session), payload));
+            case 'chatDirectory': return ok(handleChatDirectory(requireAuth(session)));
             default: return fail('Unknown action.', 'BAD_REQUEST');
         }
     }
@@ -237,10 +238,21 @@ var MESSAGE_HEADERS = ['id', 'from', 'to', 'text', 'ts', 'readAt'];
 function presenceSheet() { return sheetOrCreate('Presence', PRESENCE_HEADERS); }
 function messageSheet() { return sheetOrCreate('Messages', MESSAGE_HEADERS); }
 function isStaffRoleName(role) { return role === 'admin' || role === 'co-admin'; }
+function presenceMillis(v) {
+    if (v instanceof Date) return v.getTime();
+    if (v === 0 || v) {
+        var s = String(v).trim();
+        if (!s) return 0;
+        if (/^\d+$/.test(s)) return Number(s);
+        var t = new Date(s).getTime();
+        return isNaN(t) ? 0 : t;
+    }
+    return 0;
+}
 function touchPresence(username) {
     var sh = presenceSheet();
     var vals = sh.getDataRange().getValues();
-    var now = new Date().toISOString();
+    var now = Date.now();
     for (var r = 1; r < vals.length; r++) {
         if (String(vals[r][0] || '').toLowerCase() === String(username).toLowerCase()) {
             sh.getRange(r + 1, 2).setValue(now);
@@ -255,14 +267,14 @@ function readPresence() {
     var map = {};
     for (var r = 1; r < vals.length; r++) {
         var u = String(vals[r][0] || '').trim();
-        if (u) map[u.toLowerCase()] = String(vals[r][1] || '').trim();
+        if (u) map[u.toLowerCase()] = presenceMillis(vals[r][1]);
     }
     return map;
 }
 function handleChatPoll(session) {
     var me = session.username;
     touchPresence(me);
-    var users = readUsers().filter(function (u) { return isStaffRoleName(u.role); });
+    var users = readUsers();
     var pres = readPresence();
     var msgs = messageSheet().getDataRange().getValues();
     var now = Date.now();
@@ -281,15 +293,17 @@ function handleChatPoll(session) {
             if (f === u.username && t === me && !String(msgs[r][5] || '').trim()) unread++;
         }
         totalUnread += unread;
-        var ls = pres[String(u.username).toLowerCase()] || '';
-        var online = ls ? (now - new Date(ls).getTime() < 120000) : false;
-        contacts.push({ username: u.username, name: u.name, role: u.role, online: !!online, lastSeen: ls, unread: unread, lastTs: lastTs, lastText: lastText });
+        var ms = pres[String(u.username).toLowerCase()] || 0;
+        var online = ms ? (now - ms < 120000) : false;
+        var lastSeenIso = ms ? new Date(ms).toISOString() : '';
+        contacts.push({ username: u.username, name: u.name, role: u.role, online: !!online, lastSeen: lastSeenIso, unread: unread, lastTs: lastTs, lastText: lastText });
     }
     contacts.sort(function (a, b) { return String(b.lastTs || '').localeCompare(String(a.lastTs || '')); });
     return { me: me, contacts: contacts, totalUnread: totalUnread };
 }
 function handleGetThread(session, p) {
     var me = session.username;
+    touchPresence(me);
     var withUser = String(p && p.withUser || '').trim();
     if (!withUser) throw httpError('A conversation partner is required.', 'BAD_REQUEST');
     var sh = messageSheet();
@@ -310,19 +324,44 @@ function handleGetThread(session, p) {
 }
 function handleSendMessage(session, p) {
     var me = session.username;
+    touchPresence(me);
     var to = String(p && p.to || '').trim();
     var text = String(p && p.text || '').trim();
     if (!to) throw httpError('Recipient required.', 'BAD_REQUEST');
     if (!text) throw httpError('Message cannot be empty.', 'BAD_REQUEST');
     if (text.length > 2000) text = text.slice(0, 2000);
     var target = findUser(to);
-    if (!target || !isStaffRoleName(target.role)) throw httpError('You can only message staff members.', 'FORBIDDEN');
+    if (!target) throw httpError('That person could not be found.', 'NOT_FOUND');
     if (String(target.username).toLowerCase() === String(me).toLowerCase()) throw httpError('You cannot message yourself.', 'BAD_REQUEST');
     var sh = messageSheet();
     var id = 'm' + Date.now() + Math.floor(Math.random() * 1000);
     var ts = new Date().toISOString();
     sh.appendRow([id, me, target.username, text, ts, '']);
     return { id: id, from: me, to: target.username, text: text, ts: ts, mine: true };
+}
+function readProfilePhotos() {
+    var sh = profileSheet();
+    var vals = sh.getDataRange().getValues();
+    if (vals.length < 2) return {};
+    var c = profileCols(vals);
+    var map = {};
+    for (var r = 1; r < vals.length; r++) {
+        var u = String(vals[r][c.username] || '').trim();
+        if (u) map[u.toLowerCase()] = String(vals[r][c.photo] || '');
+    }
+    return map;
+}
+function handleChatDirectory(session) {
+    var me = session.username;
+    var photos = readProfilePhotos();
+    var users = readUsers();
+    var out = [];
+    for (var i = 0; i < users.length; i++) {
+        var u = users[i];
+        if (String(u.username).toLowerCase() === String(me).toLowerCase()) continue;
+        out.push({ username: u.username, name: u.name, role: u.role, photo: photos[String(u.username).toLowerCase()] || '' });
+    }
+    return { users: out, mePhoto: photos[String(me).toLowerCase()] || '' };
 }
 function doGet() {
     return ContentService.createTextOutput('SMC Guidance API is running.')

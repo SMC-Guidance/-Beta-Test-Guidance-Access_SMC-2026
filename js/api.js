@@ -92,6 +92,7 @@ SMC.api = (function () {
         setSecurity: function (data) { return call('setSecurity', data); },
         chatPoll: function () { return call('chatPoll', {}); },
         getThread: function (withUser) { return call('getThread', { withUser: withUser }); },
-        sendMessage: function (to, text) { return call('sendMessage', { to: to, text: text }); }
+        sendMessage: function (to, text) { return call('sendMessage', { to: to, text: text }); },
+        chatDirectory: function () { return call('chatDirectory', {}); }
     };
 })();
