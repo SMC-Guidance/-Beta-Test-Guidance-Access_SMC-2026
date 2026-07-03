@@ -89,6 +89,9 @@ SMC.api = (function () {
         securityStatus: function () { return call('securityStatus', {}); },
         unlockSite: function (code) { return call('unlockSite', { code: code }); },
         getSecurity: function () { return call('getSecurity', {}); },
-        setSecurity: function (data) { return call('setSecurity', data); }
+        setSecurity: function (data) { return call('setSecurity', data); },
+        chatPoll: function () { return call('chatPoll', {}); },
+        getThread: function (withUser) { return call('getThread', { withUser: withUser }); },
+        sendMessage: function (to, text) { return call('sendMessage', { to: to, text: text }); }
     };
 })();

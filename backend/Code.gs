@@ -50,6 +50,9 @@ function doPost(e) {
             case 'setSecurity': return ok(handleSetSecurity(requireAdmin(session), payload));
             case 'getClassColors': return ok(handleGetClassColors(session));
             case 'setClassColor': return ok(handleSetClassColor(requireAuth(session), payload));
+            case 'chatPoll': return ok(handleChatPoll(requireStaff(session)));
+            case 'getThread': return ok(handleGetThread(requireStaff(session), payload));
+            case 'sendMessage': return ok(handleSendMessage(requireStaff(session), payload));
             default: return fail('Unknown action.', 'BAD_REQUEST');
         }
     }
@@ -228,6 +231,98 @@ function handleSetClassColor(session, p) {
     if (color)
         sh.appendRow([key, color, session.username || '', now]);
     return { key: key, color: color };
+}
+var PRESENCE_HEADERS = ['username', 'lastSeen'];
+var MESSAGE_HEADERS = ['id', 'from', 'to', 'text', 'ts', 'readAt'];
+function presenceSheet() { return sheetOrCreate('Presence', PRESENCE_HEADERS); }
+function messageSheet() { return sheetOrCreate('Messages', MESSAGE_HEADERS); }
+function isStaffRoleName(role) { return role === 'admin' || role === 'co-admin'; }
+function touchPresence(username) {
+    var sh = presenceSheet();
+    var vals = sh.getDataRange().getValues();
+    var now = new Date().toISOString();
+    for (var r = 1; r < vals.length; r++) {
+        if (String(vals[r][0] || '').toLowerCase() === String(username).toLowerCase()) {
+            sh.getRange(r + 1, 2).setValue(now);
+            return;
+        }
+    }
+    sh.appendRow([username, now]);
+}
+function readPresence() {
+    var sh = presenceSheet();
+    var vals = sh.getDataRange().getValues();
+    var map = {};
+    for (var r = 1; r < vals.length; r++) {
+        var u = String(vals[r][0] || '').trim();
+        if (u) map[u.toLowerCase()] = String(vals[r][1] || '').trim();
+    }
+    return map;
+}
+function handleChatPoll(session) {
+    var me = session.username;
+    touchPresence(me);
+    var users = readUsers().filter(function (u) { return isStaffRoleName(u.role); });
+    var pres = readPresence();
+    var msgs = messageSheet().getDataRange().getValues();
+    var now = Date.now();
+    var contacts = [];
+    var totalUnread = 0;
+    for (var i = 0; i < users.length; i++) {
+        var u = users[i];
+        if (String(u.username).toLowerCase() === String(me).toLowerCase()) continue;
+        var unread = 0, lastTs = '', lastText = '';
+        for (var r = 1; r < msgs.length; r++) {
+            var f = String(msgs[r][1] || ''), t = String(msgs[r][2] || '');
+            var involves = (f === me && t === u.username) || (f === u.username && t === me);
+            if (!involves) continue;
+            var ts = String(msgs[r][4] || '');
+            if (ts > lastTs) { lastTs = ts; lastText = String(msgs[r][3] || ''); }
+            if (f === u.username && t === me && !String(msgs[r][5] || '').trim()) unread++;
+        }
+        totalUnread += unread;
+        var ls = pres[String(u.username).toLowerCase()] || '';
+        var online = ls ? (now - new Date(ls).getTime() < 120000) : false;
+        contacts.push({ username: u.username, name: u.name, role: u.role, online: !!online, lastSeen: ls, unread: unread, lastTs: lastTs, lastText: lastText });
+    }
+    contacts.sort(function (a, b) { return String(b.lastTs || '').localeCompare(String(a.lastTs || '')); });
+    return { me: me, contacts: contacts, totalUnread: totalUnread };
+}
+function handleGetThread(session, p) {
+    var me = session.username;
+    var withUser = String(p && p.withUser || '').trim();
+    if (!withUser) throw httpError('A conversation partner is required.', 'BAD_REQUEST');
+    var sh = messageSheet();
+    var vals = sh.getDataRange().getValues();
+    var out = [];
+    var toMark = [];
+    var now = new Date().toISOString();
+    for (var r = 1; r < vals.length; r++) {
+        var f = String(vals[r][1] || ''), t = String(vals[r][2] || '');
+        var involves = (f === me && t === withUser) || (f === withUser && t === me);
+        if (!involves) continue;
+        out.push({ id: String(vals[r][0] || ''), from: f, to: t, text: String(vals[r][3] || ''), ts: String(vals[r][4] || ''), mine: f === me });
+        if (f === withUser && t === me && !String(vals[r][5] || '').trim()) toMark.push(r + 1);
+    }
+    for (var k = 0; k < toMark.length; k++) { sh.getRange(toMark[k], 6).setValue(now); }
+    out.sort(function (a, b) { return String(a.ts || '').localeCompare(String(b.ts || '')); });
+    return { withUser: withUser, messages: out };
+}
+function handleSendMessage(session, p) {
+    var me = session.username;
+    var to = String(p && p.to || '').trim();
+    var text = String(p && p.text || '').trim();
+    if (!to) throw httpError('Recipient required.', 'BAD_REQUEST');
+    if (!text) throw httpError('Message cannot be empty.', 'BAD_REQUEST');
+    if (text.length > 2000) text = text.slice(0, 2000);
+    var target = findUser(to);
+    if (!target || !isStaffRoleName(target.role)) throw httpError('You can only message staff members.', 'FORBIDDEN');
+    if (String(target.username).toLowerCase() === String(me).toLowerCase()) throw httpError('You cannot message yourself.', 'BAD_REQUEST');
+    var sh = messageSheet();
+    var id = 'm' + Date.now() + Math.floor(Math.random() * 1000);
+    var ts = new Date().toISOString();
+    sh.appendRow([id, me, target.username, text, ts, '']);
+    return { id: id, from: me, to: target.username, text: text, ts: ts, mine: true };
 }
 function doGet() {
     return ContentService.createTextOutput('SMC Guidance API is running.')
