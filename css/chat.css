@@ -56,3 +56,35 @@
 .chat-bub.pending{opacity:.62}
 .chat-day{align-self:center;margin:10px 0 5px;font-size:11px;color:var(--mist,#8596B2)}
 .chat-day span{background:var(--smoke,#EEF2F9);padding:2px 10px;border-radius:10px}
+/* T104 admin chat powers */
+.chat-badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:var(--navy,#002B6B);color:#fff;font-size:9.5px;font-weight:700;letter-spacing:.03em;vertical-align:middle}
+.chat-badge.sm{background:var(--gold,#BFA050);color:#0b1220;margin-left:5px}
+.chat-admin{padding:8px 10px;border-bottom:1px solid var(--line,#DDE4F0);background:var(--smoke,#EEF2F9)}
+.chat-admin-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chat-atool{display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border:1px solid var(--line,#DDE4F0);border-radius:8px;background:var(--paper,#fff);color:var(--navy,#002B6B);font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.chat-atool:hover{background:var(--navy,#002B6B);color:#fff}
+.chat-presence{display:inline-flex;align-items:center;gap:5px;margin-left:auto;font-size:11px;color:var(--mist,#8596B2);font-weight:600}
+.chat-presence select{font:inherit;font-size:12px;padding:4px 6px;border:1px solid var(--line,#DDE4F0);border-radius:7px;background:var(--paper,#fff);color:var(--ink,#0D1B2A)}
+.chat-hact{display:flex;align-items:center;gap:4px}
+.chat-hbtn{padding:5px 9px;border:0;border-radius:8px;background:rgba(255,255,255,.18);color:#fff;cursor:pointer;font:inherit;font-size:11px;font-weight:600;line-height:1}
+.chat-hbtn:hover{background:rgba(255,255,255,.32)}
+.chat-muted{color:var(--red,#C94040);font-weight:600}
+.chat-row .chat-del{align-self:center;margin:0 4px;border:0;background:transparent;color:var(--mist,#8596B2);font-size:16px;line-height:1;cursor:pointer;opacity:0;transition:opacity .12s}
+.chat-row:hover .chat-del{opacity:.7}
+.chat-row .chat-del:hover{opacity:1;color:var(--red,#C94040)}
+.chat-bub.removed{background:transparent!important;color:var(--mist,#8596B2)!important;border:1px dashed var(--line,#DDE4F0)}
+.chat-bub.ann{background:linear-gradient(135deg,#FDF3D6,#FBE7A6)!important;color:#5a4300!important;border:1px solid var(--gold,#BFA050)}
+[data-theme="dark"] .chat-bub.ann{background:linear-gradient(135deg,#3a2f10,#4a3c14)!important;color:#F6D98A!important;border-color:#6a5410}
+.chat-anntag{display:block;font-size:9px;font-weight:800;letter-spacing:.06em;margin-bottom:3px;opacity:.85}
+.chat-row.them .chat-bub.staff{border:1px solid var(--navy2,#003B8E)}
+.chat-monitor{flex:1;display:flex;flex-direction:column;min-height:0;padding:10px}
+.chat-mon-note{font-size:11px;color:var(--mist,#8596B2);background:var(--smoke,#EEF2F9);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.chat-mon-pick{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.chat-mon-pick select{flex:1;min-width:90px;font:inherit;font-size:12px;padding:6px;border:1px solid var(--line,#DDE4F0);border-radius:8px;background:var(--paper,#fff);color:var(--ink,#0D1B2A)}
+.chat-mon-pick span{font-size:11px;color:var(--mist,#8596B2)}
+.chat-mon-msgs{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:4px 2px}
+.chat-mon-from{display:block;font-size:9.5px;font-weight:700;opacity:.7;margin-bottom:2px}
+.chat-fab-badge.prio{animation:chatPrio 1.1s ease-in-out infinite}
+@keyframes chatPrio{0%,100%{transform:scale(1)}50%{transform:scale(1.22)}}
+
+.chat-e2e{flex:0 0 auto;text-align:center;font-size:10px;color:var(--mist,#8596B2);padding:4px 0 6px}

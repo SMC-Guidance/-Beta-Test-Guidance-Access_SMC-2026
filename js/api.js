@@ -93,6 +93,12 @@ SMC.api = (function () {
         chatPoll: function () { return call('chatPoll', {}); },
         getThread: function (withUser) { return call('getThread', { withUser: withUser }); },
         sendMessage: function (to, text) { return call('sendMessage', { to: to, text: text }); },
-        chatDirectory: function () { return call('chatDirectory', {}); }
+        chatDirectory: function () { return call('chatDirectory', {}); },
+        broadcast: function (text) { return call('chatBroadcast', { text: text }); },
+        deleteMessage: function (id) { return call('deleteMessage', { id: id }); },
+        setChatMute: function (username, muted) { return call('setChatMute', { username: username, muted: muted }); },
+        setPresenceMode: function (mode) { return call('setPresenceMode', { mode: mode }); },
+        setPublicKey: function (publicKey) { return call('setPublicKey', { publicKey: publicKey }); },
+        getPublicKey: function (username) { return call('getPublicKey', { username: username }); }
     };
 })();

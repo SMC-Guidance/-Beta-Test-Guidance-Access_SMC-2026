@@ -54,6 +54,12 @@ function doPost(e) {
             case 'getThread': return ok(handleGetThread(requireAuth(session), payload));
             case 'sendMessage': return ok(handleSendMessage(requireAuth(session), payload));
             case 'chatDirectory': return ok(handleChatDirectory(requireAuth(session)));
+            case 'chatBroadcast': return ok(handleChatBroadcast(requireStaff(session), payload));
+            case 'deleteMessage': return ok(handleDeleteMessage(requireStaff(session), payload));
+            case 'setChatMute': return ok(handleSetChatMute(requireStaff(session), payload));
+            case 'setPresenceMode': return ok(handleSetPresenceMode(requireStaff(session), payload));
+            case 'setPublicKey': return ok(handleSetPublicKey(requireAuth(session), payload));
+            case 'getPublicKey': return ok(handleGetPublicKey(requireAuth(session), payload));
             default: return fail('Unknown action.', 'BAD_REQUEST');
         }
     }
@@ -234,7 +240,7 @@ function handleSetClassColor(session, p) {
     return { key: key, color: color };
 }
 var PRESENCE_HEADERS = ['username', 'lastSeen'];
-var MESSAGE_HEADERS = ['id', 'from', 'to', 'text', 'ts', 'readAt'];
+var MESSAGE_HEADERS = ['id', 'from', 'to', 'text', 'ts', 'readAt', 'kind'];
 function presenceSheet() { return sheetOrCreate('Presence', PRESENCE_HEADERS); }
 function messageSheet() { return sheetOrCreate('Messages', MESSAGE_HEADERS); }
 function isStaffRoleName(role) { return role === 'admin' || role === 'co-admin'; }
@@ -276,6 +282,7 @@ function handleChatPoll(session) {
     touchPresence(me);
     var users = readUsers();
     var pres = readPresence();
+    var flags = readChatFlags();
     var msgs = messageSheet().getDataRange().getValues();
     var now = Date.now();
     var contacts = [];
@@ -296,10 +303,16 @@ function handleChatPoll(session) {
         var ms = pres[String(u.username).toLowerCase()] || 0;
         var online = ms ? (now - ms < 120000) : false;
         var lastSeenIso = ms ? new Date(ms).toISOString() : '';
-        contacts.push({ username: u.username, name: u.name, role: u.role, online: !!online, lastSeen: lastSeenIso, unread: unread, lastTs: lastTs, lastText: lastText });
+        var fl = flags[String(u.username).toLowerCase()] || {};
+        var cmode = fl.mode || (isStaffRole(u.role) ? 'invisible' : 'normal');
+        if (cmode === 'invisible') { online = false; lastSeenIso = ''; }
+        else if (cmode === 'always') { online = true; }
+        contacts.push({ username: u.username, name: u.name, role: u.role, online: !!online, lastSeen: lastSeenIso, unread: unread, lastTs: lastTs, lastText: lastText, muted: !!fl.muted });
     }
     contacts.sort(function (a, b) { return String(b.lastTs || '').localeCompare(String(a.lastTs || '')); });
-    return { me: me, contacts: contacts, totalUnread: totalUnread };
+    var myFlags = flags[String(me).toLowerCase()] || {};
+    var myMode = myFlags.mode || (isStaffRole(session.role) ? 'invisible' : 'normal');
+    return { me: me, myRole: session.role, myName: session.name || me, myMode: myMode, contacts: contacts, totalUnread: totalUnread };
 }
 function handleGetThread(session, p) {
     var me = session.username;
@@ -315,7 +328,7 @@ function handleGetThread(session, p) {
         var f = String(vals[r][1] || ''), t = String(vals[r][2] || '');
         var involves = (f === me && t === withUser) || (f === withUser && t === me);
         if (!involves) continue;
-        out.push({ id: String(vals[r][0] || ''), from: f, to: t, text: String(vals[r][3] || ''), ts: String(vals[r][4] || ''), mine: f === me });
+        out.push({ id: String(vals[r][0] || ''), from: f, to: t, text: String(vals[r][3] || ''), ts: String(vals[r][4] || ''), mine: f === me, kind: String(vals[r][6] || '') });
         if (f === withUser && t === me && !String(vals[r][5] || '').trim()) toMark.push(r + 1);
     }
     for (var k = 0; k < toMark.length; k++) { sh.getRange(toMark[k], 6).setValue(now); }
@@ -329,14 +342,16 @@ function handleSendMessage(session, p) {
     var text = String(p && p.text || '').trim();
     if (!to) throw httpError('Recipient required.', 'BAD_REQUEST');
     if (!text) throw httpError('Message cannot be empty.', 'BAD_REQUEST');
-    if (text.length > 2000) text = text.slice(0, 2000);
+    if (text.length > 8000) text = text.slice(0, 8000);
     var target = findUser(to);
     if (!target) throw httpError('That person could not be found.', 'NOT_FOUND');
     if (String(target.username).toLowerCase() === String(me).toLowerCase()) throw httpError('You cannot message yourself.', 'BAD_REQUEST');
+    var myFlags = readChatFlags()[String(me).toLowerCase()] || {};
+    if (myFlags.muted) throw httpError('You have been muted by an administrator and cannot send messages.', 'FORBIDDEN');
     var sh = messageSheet();
     var id = 'm' + Date.now() + Math.floor(Math.random() * 1000);
     var ts = new Date().toISOString();
-    sh.appendRow([id, me, target.username, text, ts, '']);
+    sh.appendRow([id, me, target.username, text, ts, '', '']);
     return { id: id, from: me, to: target.username, text: text, ts: ts, mine: true };
 }
 function readProfilePhotos() {
@@ -354,14 +369,146 @@ function readProfilePhotos() {
 function handleChatDirectory(session) {
     var me = session.username;
     var photos = readProfilePhotos();
+    var keys = readChatKeys();
     var users = readUsers();
     var out = [];
     for (var i = 0; i < users.length; i++) {
         var u = users[i];
         if (String(u.username).toLowerCase() === String(me).toLowerCase()) continue;
-        out.push({ username: u.username, name: u.name, role: u.role, photo: photos[String(u.username).toLowerCase()] || '' });
+        out.push({ username: u.username, name: u.name, role: u.role, photo: photos[String(u.username).toLowerCase()] || '', pubKey: keys[String(u.username).toLowerCase()] || '' });
     }
-    return { users: out, mePhoto: photos[String(me).toLowerCase()] || '' };
+    return { users: out, mePhoto: photos[String(me).toLowerCase()] || '', myKey: keys[String(me).toLowerCase()] || '' };
+}
+var CHATFLAG_HEADERS = ['username', 'muted', 'presenceMode', 'updatedAt'];
+function chatFlagSheet() { return sheetOrCreate('ChatFlags', CHATFLAG_HEADERS); }
+function readChatFlags() {
+    var sh = chatFlagSheet();
+    var vals = sh.getDataRange().getValues();
+    var map = {};
+    for (var r = 1; r < vals.length; r++) {
+        var u = String(vals[r][0] || '').trim();
+        if (!u) continue;
+        map[u.toLowerCase()] = { muted: String(vals[r][1] || '').toUpperCase() === 'YES', mode: String(vals[r][2] || '').trim() };
+    }
+    return map;
+}
+function setChatFlag(username, patch) {
+    var sh = chatFlagSheet();
+    var vals = sh.getDataRange().getValues();
+    var now = new Date().toISOString();
+    for (var r = 1; r < vals.length; r++) {
+        if (String(vals[r][0] || '').toLowerCase() === String(username).toLowerCase()) {
+            if (patch.hasOwnProperty('muted')) sh.getRange(r + 1, 2).setValue(patch.muted ? 'YES' : '');
+            if (patch.hasOwnProperty('mode')) sh.getRange(r + 1, 3).setValue(patch.mode);
+            sh.getRange(r + 1, 4).setValue(now);
+            return;
+        }
+    }
+    sh.appendRow([username, patch.muted ? 'YES' : '', patch.mode || 'normal', now]);
+}
+function handleChatBroadcast(session, p) {
+    var me = session.username;
+    var text = String(p && p.text || '').trim();
+    if (!text) throw httpError('Announcement cannot be empty.', 'BAD_REQUEST');
+    if (text.length > 2000) text = text.slice(0, 2000);
+    var users = readUsers();
+    var sh = messageSheet();
+    var now = new Date().toISOString();
+    var base = Date.now();
+    var sent = 0;
+    for (var i = 0; i < users.length; i++) {
+        var u = users[i];
+        if (String(u.username).toLowerCase() === String(me).toLowerCase()) continue;
+        sh.appendRow(['a' + base + '_' + i, me, u.username, text, now, '', 'announcement']);
+        sent++;
+    }
+    return { sent: sent };
+}
+function handleDeleteMessage(session, p) {
+    var id = String(p && p.id || '').trim();
+    if (!id) throw httpError('Message id required.', 'BAD_REQUEST');
+    var sh = messageSheet();
+    var vals = sh.getDataRange().getValues();
+    for (var r = 1; r < vals.length; r++) {
+        if (String(vals[r][0] || '') === id) {
+            sh.getRange(r + 1, 4).setValue('');
+            sh.getRange(r + 1, 7).setValue('removed');
+            return { ok: true, id: id };
+        }
+    }
+    throw httpError('Message not found.', 'NOT_FOUND');
+}
+function handleSetChatMute(session, p) {
+    var username = String(p && p.username || '').trim();
+    if (!username) throw httpError('Username required.', 'BAD_REQUEST');
+    var target = findUser(username);
+    if (!target) throw httpError('User not found.', 'NOT_FOUND');
+    if (isStaffRole(target.role)) throw httpError('You cannot mute a staff member.', 'BAD_REQUEST');
+    var muted = !!(p && p.muted);
+    setChatFlag(target.username, { muted: muted });
+    return { username: target.username, muted: muted };
+}
+function handleAdminThread(session, p) {
+    var a = String(p && p.userA || '').trim();
+    var b = String(p && p.userB || '').trim();
+    if (!a || !b) throw httpError('Two people are required.', 'BAD_REQUEST');
+    if (a.toLowerCase() === b.toLowerCase()) throw httpError('Pick two different people.', 'BAD_REQUEST');
+    var sh = messageSheet();
+    var vals = sh.getDataRange().getValues();
+    var out = [];
+    for (var r = 1; r < vals.length; r++) {
+        var f = String(vals[r][1] || ''), t = String(vals[r][2] || '');
+        var fl = f.toLowerCase(), tl = t.toLowerCase(), al = a.toLowerCase(), bl = b.toLowerCase();
+        var involves = (fl === al && tl === bl) || (fl === bl && tl === al);
+        if (!involves) continue;
+        out.push({ id: String(vals[r][0] || ''), from: f, to: t, text: String(vals[r][3] || ''), ts: String(vals[r][4] || ''), kind: String(vals[r][6] || '') });
+    }
+    out.sort(function (x, y) { return String(x.ts || '').localeCompare(String(y.ts || '')); });
+    return { userA: a, userB: b, messages: out };
+}
+function handleSetPresenceMode(session, p) {
+    var mode = String(p && p.mode || 'normal').trim();
+    if (mode !== 'normal' && mode !== 'invisible' && mode !== 'always') mode = 'normal';
+    setChatFlag(session.username, { mode: mode });
+    return { mode: mode };
+}
+var CHATKEY_HEADERS = ['username', 'publicKey', 'updatedAt'];
+function chatKeySheet() { return sheetOrCreate('ChatKeys', CHATKEY_HEADERS); }
+function readChatKeys() {
+    var sh = chatKeySheet();
+    var vals = sh.getDataRange().getValues();
+    var map = {};
+    for (var r = 1; r < vals.length; r++) {
+        var u = String(vals[r][0] || '').trim();
+        if (u) map[u.toLowerCase()] = String(vals[r][1] || '');
+    }
+    return map;
+}
+function setChatKey(username, publicKey) {
+    var sh = chatKeySheet();
+    var vals = sh.getDataRange().getValues();
+    var now = new Date().toISOString();
+    for (var r = 1; r < vals.length; r++) {
+        if (String(vals[r][0] || '').toLowerCase() === String(username).toLowerCase()) {
+            sh.getRange(r + 1, 2).setValue(publicKey);
+            sh.getRange(r + 1, 3).setValue(now);
+            return;
+        }
+    }
+    sh.appendRow([username, publicKey, now]);
+}
+function handleSetPublicKey(session, p) {
+    var key = String(p && p.publicKey || '').trim();
+    if (!key) throw httpError('Public key required.', 'BAD_REQUEST');
+    if (key.length > 4000) throw httpError('Public key too large.', 'BAD_REQUEST');
+    setChatKey(session.username, key);
+    return { ok: true };
+}
+function handleGetPublicKey(session, p) {
+    var username = String(p && p.username || '').trim();
+    if (!username) throw httpError('Username required.', 'BAD_REQUEST');
+    var keys = readChatKeys();
+    return { username: username, publicKey: keys[username.toLowerCase()] || '' };
 }
 function doGet() {
     return ContentService.createTextOutput('SMC Guidance API is running.')
