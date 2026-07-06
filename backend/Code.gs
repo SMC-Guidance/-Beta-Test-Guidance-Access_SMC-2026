@@ -13,6 +13,14 @@ function doPost(e) {
         var action = req.action;
         var payload = req.payload || {};
         var session = verifyToken(req.token);
+        // Site-wide maintenance: force-block EVERY request (including
+        // already-signed-in users and admins). Only the escape hatch
+        // (maintOff) and the maintenance status check (getSiteMaint) get
+        // through, so an admin can lift maintenance with the passcode.
+        if (action !== 'maintOff' && action !== 'getSiteMaint' && siteMaintOn()) {
+            var _mm = handleGetSiteMaint();
+            throw httpError(_mm.message || 'The site is temporarily down for maintenance. Please check back soon.', 'MAINTENANCE');
+        }
         switch (action) {
             case 'login': return ok(handleLogin(payload));
             case 'register': return ok(handleRegister(payload));
@@ -66,6 +74,7 @@ function doPost(e) {
             case 'unsendMessage': return ok(handleUnsendMessage(requireAuth(session), payload));
             case 'getSiteMaint': return ok(handleGetSiteMaint());
             case 'setSiteMaint': return ok(handleSetSiteMaint(requireAdmin(session), payload));
+            case 'maintOff': return ok(handleMaintOff(payload));
             case 'clearMessages': return ok(handleClearMessages(requireAdmin(session)));
             case 'createShare': return ok(handleCreateShare(requireAuth(session), payload));
             case 'getShared': return ok(handleGetShared(payload));
@@ -116,11 +125,41 @@ function handleGetSiteMaint() {
 }
 function handleSetSiteMaint(session, p) {
     var on = !!(p && p.on);
+    // Safety check: never let an admin lock the whole site if there is no
+    // passcode configured, or they would be unable to get back in.
+    if (on && !maintCode())
+        throw httpError('Set a maintenance passcode first. Add MAINT_CODE (or UNLOCK_CODE / REG_CODE) in Apps Script \u2192 Project Settings \u2192 Script Properties before turning maintenance on.', 'CONFIG');
     var message = String(p && p.message || '').trim();
     if (message.length > 500) message = message.slice(0, 500);
     var m = { on: on, message: message, by: session.username, ts: new Date().toISOString() };
     props().setProperty('SITE_MAINT', JSON.stringify(m));
     return { on: m.on, message: m.message, by: m.by, ts: m.ts };
+}
+// Returns true when the whole site is in maintenance mode.
+function siteMaintOn() {
+    var raw = prop('SITE_MAINT', '{}');
+    try { return !!(JSON.parse(raw) || {}).on; } catch (e) { return false; }
+}
+// The secret maintenance passcode. Prefers MAINT_CODE, then falls back to the
+// existing UNLOCK_CODE / REG_CODE so you can reuse a code you already have.
+function maintCode() {
+    var c = prop('MAINT_CODE', '');
+    if (!c) c = prop('UNLOCK_CODE', '');
+    if (!c) c = prop('REG_CODE', '');
+    return c;
+}
+// Escape hatch: turn maintenance OFF with the passcode, WITHOUT a session.
+// This is what lets an admin back in while the force-block is active.
+function handleMaintOff(p) {
+    var code = String(p && p.code || '');
+    var expected = maintCode();
+    if (!expected)
+        throw httpError('No maintenance passcode is configured. An administrator must set MAINT_CODE (or UNLOCK_CODE / REG_CODE) in Script Properties.', 'CONFIG');
+    if (!constantTimeEquals(code, expected))
+        throw httpError('Incorrect maintenance passcode.', 'AUTH');
+    var m = { on: false, message: '', by: 'passcode', ts: new Date().toISOString() };
+    props().setProperty('SITE_MAINT', JSON.stringify(m));
+    return { on: false };
 }
 function handleClearMessages(session) {
     var sh = messageSheet();

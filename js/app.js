@@ -483,7 +483,7 @@ SMC.app = (function () {
     function showSiteMaint(msg) { var o = document.getElementById('siteMaintOverlay'); if (!o) return; var m = document.getElementById('siteMaintMsg'); if (m) m.textContent = msg || 'The site is temporarily down for maintenance. Please check back soon.'; o.classList.add('on'); o.setAttribute('aria-hidden', 'false'); }
     function hideSiteMaint() { var o = document.getElementById('siteMaintOverlay'); if (o) { o.classList.remove('on'); o.setAttribute('aria-hidden', 'true'); } }
     var maintNotified = false;
-    function checkSiteMaint() { if (!api.getSiteMaint) return; api.getSiteMaint().then(function (m) { var admin = isAdminUser(); if (m && m.on && !admin) { showSiteMaint(m.message); } else { hideSiteMaint(); if (m && m.on && admin && !maintNotified) { maintNotified = true; ui.toast('Maintenance mode is ON \u2014 others see your notice.', 'ok'); } if (!(m && m.on)) maintNotified = false; } }).catch(function () { }); }
+    function checkSiteMaint() { if (!api.getSiteMaint) return; api.getSiteMaint().then(function (m) { if (m && m.on) { showSiteMaint(m.message); } else { hideSiteMaint(); } }).catch(function () { }); }
     function setupDashClassDropdown() {
         var btn = document.getElementById('dashClassListsBtn');
         var menu = document.getElementById('dashClMenu');

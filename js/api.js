@@ -46,6 +46,11 @@ SMC.api = (function () {
                 if (res && res.code === 'AUTH') {
                     clearToken();
                 }
+                // Force-block: the server refused because the whole site is in
+                // maintenance. Show the maintenance screen to everyone at once.
+                if (res && res.code === 'MAINTENANCE' && window.SMC && SMC.app && SMC.app.showSiteMaint) {
+                    try { SMC.app.showSiteMaint(msg); } catch (e2) { }
+                }
                 var err = new Error(msg);
                 err.code = res && res.code;
                 throw err;
@@ -126,6 +131,7 @@ SMC.api = (function () {
         setPresenceMode: function (mode) { return call('setPresenceMode', { mode: mode }); },
         getSiteMaint: function () { return call('getSiteMaint', {}); },
         setSiteMaint: function (on, message) { return call('setSiteMaint', { on: !!on, message: message || '' }); },
+        maintOff: function (code) { return call('maintOff', { code: code }); },
         createShare: function (data) { return call('createShare', data || {}); },
         getShared: function (token) { return call('getShared', { token: token }); },
         listShares: function () { return call('listShares', {}); },

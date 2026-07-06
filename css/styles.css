@@ -1348,7 +1348,7 @@ html{transition:background .25s ease,color .25s ease}
   @page{margin:14mm}
 }
 /* ===== Command Center ===== */
-.cmd-ov{position:fixed;inset:0;background:rgba(4,10,20,.6);display:none;align-items:center;justify-content:center;z-index:1600;padding:20px}
+.cmd-ov{position:fixed;inset:0;background:rgba(4,10,20,.6);display:none;align-items:center;justify-content:center;z-index:2000;padding:20px}
 .cmd-ov.on{display:flex}
 .cmd-box{width:100%;max-width:680px;background:#0b1220;border:1px solid #24324a;border-radius:12px;box-shadow:0 26px 70px rgba(0,0,0,.6);overflow:hidden;font-family:'SF Mono',Menlo,Consolas,monospace}
 .cmd-top{display:flex;align-items:center;gap:7px;padding:10px 14px;background:#111a2c;border-bottom:1px solid #24324a}

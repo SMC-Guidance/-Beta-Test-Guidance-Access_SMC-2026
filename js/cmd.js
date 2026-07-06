@@ -69,8 +69,8 @@ SMC.cmd = (function () {
             '  login <user> <pass>  sign in from the command center',
             '  unlock <code>        lift a site lock with the admin unlock code',
             '  lock                 (admin) lock the whole website',
-            '  maintenance <msg>    (admin) put the whole site in maintenance with a message',
-            '  maintenance off      (admin) turn maintenance mode off',
+            '  maintenance <msg>    (admin) lock the WHOLE site (everyone, incl. admins) with a message',
+            '  maintenance off <code>  lift maintenance using the secret passcode (no login needed)',
             '  clearmessages        (admin) delete ALL chat messages for everyone',
             '  admin                (admin) open Staff & Access',
             '  incidents            open the Incident Reports section',
@@ -140,15 +140,26 @@ SMC.cmd = (function () {
         api.setSecurity({ lock: true }).then(function () { line('Website locked. Others are blocked until you unlock.', 'ok'); }).catch(function (e) { line(e.message || 'Only admins can lock the site.', 'err'); });
     }
     function doMaint(args) {
-        var u = curUser();
-        if (!(u && u.role === 'admin')) return line('Admin sign-in required for maintenance.', 'err');
-        if (!args.length) return line('Usage: maintenance <message>   |   maintenance off', 'err');
+        if (!args.length) return line('Usage: maintenance <message>   |   maintenance off <code>', 'err');
         if (args[0].toLowerCase() === 'off') {
-            api.setSiteMaint(false, '').then(function () { line('Maintenance mode OFF. Site is back online for everyone.', 'ok'); if (SMC.app && SMC.app.hideSiteMaint) SMC.app.hideSiteMaint(); }).catch(function (e) { line(e.message || 'Failed.', 'err'); });
+            // Escape hatch: works WITHOUT being signed in (force-block logs
+            // everyone out), so it always requires the secret passcode.
+            var code = args.slice(1).join(' ');
+            if (!code) return line('Usage: maintenance off <code>  (the secret maintenance passcode)', 'err');
+            api.maintOff(code).then(function () {
+                line('Maintenance mode OFF. The site is back online for everyone.', 'ok');
+                if (SMC.app && SMC.app.hideSiteMaint) SMC.app.hideSiteMaint();
+            }).catch(function (e) { line(e.message || 'Failed.', 'err'); });
             return;
         }
+        // Turning maintenance ON still requires an admin session.
+        var u = curUser();
+        if (!(u && u.role === 'admin')) return line('Admin sign-in required to turn maintenance on.', 'err');
         var msg = args.join(' ');
-        api.setSiteMaint(true, msg).then(function () { line('Maintenance mode ON. Everyone else now sees: "' + msg + '"', 'ok'); }).catch(function (e) { line(e.message || 'Failed.', 'err'); });
+        api.setSiteMaint(true, msg).then(function () {
+            line('Maintenance mode ON. EVERYONE (including admins) is now locked out.', 'ok');
+            line('To get back in: maintenance off <code>', 'sys');
+        }).catch(function (e) { line(e.message || 'Failed.', 'err'); });
     }
     function doClearMessages() {
         var u = curUser();
