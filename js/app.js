@@ -409,6 +409,9 @@ SMC.app = (function () {
             if (lc) lc.addEventListener('keydown', function (e) { if (e.key === 'Enter') lb.click(); });
         })();
         checkLock();
+        checkSiteMaint();
+        if (!window.__smcMaintTimer) window.__smcMaintTimer = setInterval(checkSiteMaint, 60000);
+        window.addEventListener('storage', function (e) { if (e.key === 'smc_token') location.reload(); });
         var mb = document.getElementById('maintBtn');
         if (mb)
             mb.addEventListener('click', toggleMaintenance);
@@ -592,7 +595,7 @@ SMC.app = (function () {
             if (v) showView(v);
             setTimeout(place, v ? 130 : 0);
         }
-        function markSeen() { try { localStorage.setItem('smc-whatsnew-2026-08a', '1'); } catch (e) { } }
+        function markSeen() { try { localStorage.setItem('smc-whatsnew-2026-08c', '1'); } catch (e) { } }
         function close() { ov.classList.remove('on'); ov.setAttribute('aria-hidden', 'true'); clearOpen(); markSeen(); window.removeEventListener('resize', place); }
         back.addEventListener('click', function () { if (i > 0) { i--; render(); } });
         next.addEventListener('click', function () { if (i < steps.length - 1) { i++; render(); } else close(); });
@@ -613,7 +616,7 @@ SMC.app = (function () {
         if (reopen) reopen.addEventListener('click', function () { if (wnIntroOpen) wnIntroOpen(); else if (wnOpen) wnOpen(); });
     }
     function maybeShowWhatsNew() {
-        try { if (localStorage.getItem('smc-whatsnew-2026-08a')) return; } catch (e) { }
+        try { if (localStorage.getItem('smc-whatsnew-2026-08c')) return; } catch (e) { }
         if (wnIntroOpen) setTimeout(wnIntroOpen, 700);
         else if (wnOpen) setTimeout(wnOpen, 700);
     }

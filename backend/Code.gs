@@ -16,6 +16,9 @@ function doPost(e) {
         switch (action) {
             case 'login': return ok(handleLogin(payload));
             case 'register': return ok(handleRegister(payload));
+            case 'verify2fa': return ok(handleVerify2fa(payload));
+            case 'set2faEmail': return ok(handleSet2faEmail(payload));
+            case 'resend2fa': return ok(handleResend2fa(payload));
             case 'publicStats': return ok(handlePublicStats());
             case 'me': return ok(requireAuth(session));
             case 'records': return ok(handleRecords(requireAuth(session)));
@@ -60,10 +63,10 @@ function doPost(e) {
             case 'setPresenceMode': return ok(handleSetPresenceMode(requireStaff(session), payload));
             case 'setPublicKey': return ok(handleSetPublicKey(requireAuth(session), payload));
             case 'getPublicKey': return ok(handleGetPublicKey(requireAuth(session), payload));
-            case 'adminThread': return ok(handleAdminThread(requireStaff(session), payload));
             case 'unsendMessage': return ok(handleUnsendMessage(requireAuth(session), payload));
             case 'getSiteMaint': return ok(handleGetSiteMaint());
             case 'setSiteMaint': return ok(handleSetSiteMaint(requireAdmin(session), payload));
+            case 'clearMessages': return ok(handleClearMessages(requireAdmin(session)));
             default: return fail('Unknown action.', 'BAD_REQUEST');
         }
     }
@@ -114,6 +117,12 @@ function handleSetSiteMaint(session, p) {
     var m = { on: on, message: message, by: session.username, ts: new Date().toISOString() };
     props().setProperty('SITE_MAINT', JSON.stringify(m));
     return { on: m.on, message: m.message, by: m.by, ts: m.ts };
+}
+function handleClearMessages(session) {
+    var sh = messageSheet();
+    var last = sh.getLastRow();
+    if (last > 1) sh.getRange(2, 1, last - 1, sh.getLastColumn()).clearContent();
+    return { cleared: true };
 }
 var PROFILE_HEADERS = ['username', 'name', 'role', 'notes', 'photo', 'updatedAt'];
 function profileSheet() { return sheetOrCreate('Profiles', PROFILE_HEADERS); }
@@ -670,7 +679,7 @@ function readUsers() {
         return [];
     var head = values[0].map(function (h) { return String(h).trim().toLowerCase(); });
     var col = function (name) { return head.indexOf(name); };
-    var iU = col('username'), iN = col('name'), iR = col('role'), iS = col('salt'), iH = col('hash'), iD = col('designate');
+    var iU = col('username'), iN = col('name'), iR = col('role'), iS = col('salt'), iH = col('hash'), iD = col('designate'), iE = col('email');
     var out = [];
     for (var r = 1; r < values.length; r++) {
         var row = values[r];
@@ -683,7 +692,8 @@ function readUsers() {
             role: iR >= 0 ? String(row[iR]).trim() : 'counselor',
             salt: iS >= 0 ? String(row[iS]) : '',
             hash: iH >= 0 ? String(row[iH]) : '',
-            designate: iD >= 0 ? String(row[iD]).trim() : ''
+            designate: iD >= 0 ? String(row[iD]).trim() : '',
+            email: iE >= 0 ? String(row[iE]).trim() : ''
         });
     }
     return out;
@@ -713,10 +723,149 @@ function handleLogin(p) {
         throw httpError('Incorrect username or password. ' + left + ' attempt' + (left === 1 ? '' : 's') + ' left before the site locks.', 'AUTH');
     }
     props().setProperty('LOGIN_FAILS', '0');
+    var deviceId = String(p.deviceId || '').trim();
+    if (deviceId && isTrustedDevice(u.username, deviceId))
+        return issueSession(u);
+    if (!u.email)
+        return { twofa: 'email_required' };
+    sendTwoFactorCode(u, deviceId);
+    return { twofa: 'code_sent', emailMasked: maskEmail(u.email) };
+}
+function issueSession(u) {
     var safe = { username: u.username, name: u.name, role: u.role };
     var token = makeToken(safe);
     safe.expiresAt = verifyToken(token).expiresAt;
     return { token: token, user: safe };
+}
+function readTrustedDevices(username) {
+    var raw = prop('DEV_' + String(username).toLowerCase(), '');
+    if (!raw)
+        return [];
+    try {
+        var a = JSON.parse(raw);
+        return (a && a.length) ? a : [];
+    }
+    catch (e) {
+        return [];
+    }
+}
+function isTrustedDevice(username, deviceId) {
+    if (!deviceId)
+        return false;
+    return readTrustedDevices(username).indexOf(deviceId) !== -1;
+}
+function trustDevice(username, deviceId) {
+    if (!deviceId)
+        return;
+    var list = readTrustedDevices(username);
+    if (list.indexOf(deviceId) === -1)
+        list.push(deviceId);
+    while (list.length > 20)
+        list.shift();
+    props().setProperty('DEV_' + String(username).toLowerCase(), JSON.stringify(list));
+}
+function maskEmail(e) {
+    e = String(e || '');
+    var at = e.indexOf('@');
+    if (at < 1)
+        return e;
+    var name = e.slice(0, at), dom = e.slice(at);
+    return name.charAt(0) + (name.length > 2 ? '***' : '*') + dom;
+}
+function sendTwoFactorCode(u, deviceId) {
+    var code = String(Math.floor(100000 + Math.random() * 900000));
+    var rec = {
+        h: hmacHex(code, prop('SESSION_SECRET', 'x')),
+        exp: Date.now() + 10 * 60 * 1000,
+        dev: String(deviceId || ''),
+        tries: 0
+    };
+    props().setProperty('TFA_' + u.username.toLowerCase(), JSON.stringify(rec));
+    var subject = 'Your SMC Guidance sign-in code';
+    var body = 'Your SMC Guidance verification code is ' + code + '. It expires in 10 minutes. If you did not try to sign in, you can ignore this email.';
+    MailApp.sendEmail(u.email, subject, body);
+}
+function handleVerify2fa(p) {
+    if (secIsLocked())
+        throw httpError('The website is locked due to suspicious activity. An administrator must unlock it with the unlock code.', 'LOCKED');
+    var u = findUser(p.username);
+    var candidate = hashPassword(String(p.password || ''), u ? u.salt : 'nosalt');
+    if (!u || !constantTimeEquals(candidate, u.hash))
+        throw httpError('Incorrect username or password.', 'AUTH');
+    var key = 'TFA_' + u.username.toLowerCase();
+    var raw = prop(key, '');
+    if (!raw)
+        throw httpError('No verification in progress. Please sign in again.', 'AUTH');
+    var rec;
+    try {
+        rec = JSON.parse(raw);
+    }
+    catch (e) {
+        props().deleteProperty(key);
+        throw httpError('Please sign in again.', 'AUTH');
+    }
+    if (!rec || Date.now() > rec.exp) {
+        props().deleteProperty(key);
+        throw httpError('That code has expired. Please request a new one.', 'AUTH');
+    }
+    if ((rec.tries || 0) >= 5) {
+        props().deleteProperty(key);
+        throw httpError('Too many incorrect codes. Please sign in again.', 'AUTH');
+    }
+    var code = String(p.code || '').trim();
+    if (!constantTimeEquals(hmacHex(code, prop('SESSION_SECRET', 'x')), rec.h)) {
+        rec.tries = (rec.tries || 0) + 1;
+        props().setProperty(key, JSON.stringify(rec));
+        throw httpError('Incorrect code. Please try again.', 'AUTH');
+    }
+    props().deleteProperty(key);
+    var deviceId = String(p.deviceId || '').trim();
+    if (p.remember && deviceId)
+        trustDevice(u.username, deviceId);
+    return issueSession(u);
+}
+function handleSet2faEmail(p) {
+    if (secIsLocked())
+        throw httpError('The website is locked due to suspicious activity. An administrator must unlock it with the unlock code.', 'LOCKED');
+    var u = findUser(p.username);
+    var candidate = hashPassword(String(p.password || ''), u ? u.salt : 'nosalt');
+    if (!u || !constantTimeEquals(candidate, u.hash))
+        throw httpError('Incorrect username or password.', 'AUTH');
+    var email = String(p.email || '').trim();
+    if (!email || email.indexOf('@') < 1 || email.indexOf('.') === -1)
+        throw httpError('Please enter a valid email address.', 'BAD_REQUEST');
+    setUserEmail(u.username, email);
+    u.email = email;
+    sendTwoFactorCode(u, String(p.deviceId || ''));
+    return { twofa: 'code_sent', emailMasked: maskEmail(email) };
+}
+function handleResend2fa(p) {
+    var u = findUser(p.username);
+    var candidate = hashPassword(String(p.password || ''), u ? u.salt : 'nosalt');
+    if (!u || !constantTimeEquals(candidate, u.hash))
+        throw httpError('Incorrect username or password.', 'AUTH');
+    if (!u.email)
+        throw httpError('No email address on file.', 'BAD_REQUEST');
+    sendTwoFactorCode(u, String(p.deviceId || ''));
+    return { twofa: 'code_sent', emailMasked: maskEmail(u.email) };
+}
+function setUserEmail(username, email) {
+    var sh = sheet('Users');
+    var values = sh.getDataRange().getValues();
+    var head = values[0].map(function (h) { return String(h).trim().toLowerCase(); });
+    var iEmail = head.indexOf('email');
+    if (iEmail === -1) {
+        iEmail = head.length;
+        sh.getRange(1, iEmail + 1).setValue('email');
+    }
+    var iU = head.indexOf('username');
+    var uname = String(username).trim().toLowerCase();
+    for (var r = 1; r < values.length; r++) {
+        if (String(values[r][iU]).trim().toLowerCase() === uname) {
+            sh.getRange(r + 1, iEmail + 1).setValue(email);
+            return;
+        }
+    }
 }
 function handleRegister(p) {
     var name = String(p.name || '').trim();
@@ -734,10 +883,14 @@ function handleRegister(p) {
         throw httpError('Invalid registration code.', 'AUTH');
     if (findUser(username))
         throw httpError('That username is already taken.', 'CONFLICT');
+    var email = String(p.email || '').trim();
+    if (!email || email.indexOf('@') < 1 || email.indexOf('.') === -1)
+        throw httpError('Please enter a valid email address.', 'BAD_REQUEST');
     var salt = randomToken(16);
     var hash = hashPassword(password, salt);
     var sh = sheet('Users');
     sh.appendRow([username, name, 'counselor', salt, hash, '']);
+    setUserEmail(username, email);
     return { created: true };
 }
 function handleRecords(session) {

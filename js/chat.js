@@ -168,7 +168,6 @@ SMC.chat = (function () {
         var h = '<div class="chat-admin-row">' +
             '<button type="button" class="chat-atool" id="cAnnounce">\uD83D\uDCE3 Announce</button>' +
             '<button type="button" class="chat-atool" id="cMsgOne">\u2709\uFE0F Message someone</button>' +
-            '<button type="button" class="chat-atool" id="cMonitor">\uD83D\uDC41\uFE0F Monitor</button>' +
             '<label class="chat-presence">Status <select id="chatPresence">' + opts + '</select></label>' +
             '</div>';
         h += '<div class="chat-sec-label">Online \u2014 ' + online.length + '</div>';
@@ -180,7 +179,6 @@ SMC.chat = (function () {
         list.innerHTML = h;
         el('cAnnounce').addEventListener('click', function () { doAnnounce(''); });
         el('cMsgOne').addEventListener('click', doMessageSomeone);
-        el('cMonitor').addEventListener('click', openMonitor);
         el('chatPresence').addEventListener('change', function () { setPresence(this.value); });
         var mb = list.querySelectorAll('[data-mute]');
         for (var x = 0; x < mb.length; x++) { mb[x].addEventListener('click', function () { var u = this.getAttribute('data-mute'); var muted = this.getAttribute('data-muted') === '1'; doMute(u, !muted); }); }

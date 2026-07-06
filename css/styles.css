@@ -1612,3 +1612,8 @@ html{transition:background .25s ease,color .25s ease}
   html,body{background:#fff!important;background-color:#fff!important;background-image:none!important}
   #printArea,#incPrintArea{background:#fff!important}
 }
+
+/* Two-step verification overlay */
+.tfa-remember{display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;margin:8px 0;color:var(--mist)}
+.tfa-link{cursor:pointer;text-decoration:underline}
+.tfa-link:hover{color:var(--navy)}

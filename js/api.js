@@ -3,16 +3,27 @@ window.SMC = window.SMC || {};
 SMC.api = (function () {
     var TOKEN_KEY = 'smc_token';
     function getToken() { try {
-        return sessionStorage.getItem(TOKEN_KEY) || null;
+        return localStorage.getItem(TOKEN_KEY) || null;
     }
     catch (e) {
         return null;
     } }
     function setToken(t) { try {
-        t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY);
+        t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY);
     }
     catch (e) { } }
     function clearToken() { setToken(null); }
+    function deviceId() {
+        try {
+            var d = localStorage.getItem('smc_device');
+            if (!d) {
+                d = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+                localStorage.setItem('smc_device', d);
+            }
+            return d;
+        }
+        catch (e) { return ''; }
+    }
     function call(action, payload) {
         var url = (SMC.config && SMC.config.apiUrl) || '';
         if (!url || url.indexOf('PASTE_') === 0) {
@@ -47,11 +58,24 @@ SMC.api = (function () {
         setToken: setToken,
         clearToken: clearToken,
         login: function (username, password) {
-            return call('login', { username: username, password: password }).then(function (d) {
+            return call('login', { username: username, password: password, deviceId: deviceId() }).then(function (d) {
                 if (d && d.token)
                     setToken(d.token);
                 return d;
             });
+        },
+        verify2fa: function (username, password, code, remember) {
+            return call('verify2fa', { username: username, password: password, code: code, deviceId: deviceId(), remember: !!remember }).then(function (d) {
+                if (d && d.token)
+                    setToken(d.token);
+                return d;
+            });
+        },
+        set2faEmail: function (username, password, email) {
+            return call('set2faEmail', { username: username, password: password, email: email, deviceId: deviceId() });
+        },
+        resend2fa: function (username, password) {
+            return call('resend2fa', { username: username, password: password, deviceId: deviceId() });
         },
         register: function (data) { return call('register', data); },
         me: function () { return call('me', {}); },
@@ -96,10 +120,10 @@ SMC.api = (function () {
         chatDirectory: function () { return call('chatDirectory', {}); },
         broadcast: function (text, to) { return call('chatBroadcast', { text: text, to: to || '' }); },
         deleteMessage: function (id) { return call('deleteMessage', { id: id }); },
+        clearMessages: function () { return call('clearMessages', {}); },
         unsendMessage: function (id) { return call('unsendMessage', { id: id }); },
         setChatMute: function (username, muted) { return call('setChatMute', { username: username, muted: muted }); },
         setPresenceMode: function (mode) { return call('setPresenceMode', { mode: mode }); },
-        adminThread: function (userA, userB) { return call('adminThread', { userA: userA, userB: userB }); },
         getSiteMaint: function () { return call('getSiteMaint', {}); },
         setSiteMaint: function (on, message) { return call('setSiteMaint', { on: !!on, message: message || '' }); }
     };

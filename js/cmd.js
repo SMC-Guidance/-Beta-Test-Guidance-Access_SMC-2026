@@ -3,6 +3,7 @@ window.SMC = window.SMC || {};
 SMC.cmd = (function () {
     var api = SMC.api;
     var isOpen = false, typed = '';
+    var pend2fa = null;
     function cfg() { return (SMC.config && SMC.config.commandCenter) || {}; }
     function pass() { return String(cfg().passphrase || 'command').toLowerCase(); }
     function combo() { return cfg().combo || { ctrl: true, alt: true, key: 'k' }; }
@@ -44,9 +45,12 @@ SMC.cmd = (function () {
             case 'status': return doStatus();
             case 'whoami': var u = curUser(); return line(u ? (u.name + ' (' + u.role + ')') : 'Not signed in.', 'sys');
             case 'login': return doCmdLogin(args);
+            case 'code': return doCmd2fa(args);
+            case 'setemail': return doCmdSetEmail(args);
             case 'unlock': return doUnlock(args);
             case 'lock': return doLock();
             case 'maintenance': case 'maint': return doMaint(args);
+            case 'clearmessages': case 'clearchat': return doClearMessages();
             case 'admin': return goAdmin();
             case 'incidents': return goView('incidents');
             case 'setmax': return doSetMax(args);
@@ -67,6 +71,7 @@ SMC.cmd = (function () {
             '  lock                 (admin) lock the whole website',
             '  maintenance <msg>    (admin) put the whole site in maintenance with a message',
             '  maintenance off      (admin) turn maintenance mode off',
+            '  clearmessages        (admin) delete ALL chat messages for everyone',
             '  admin                (admin) open Staff & Access',
             '  incidents            open the Incident Reports section',
             '  setmax <n>           (admin) set max failed-login attempts',
@@ -93,7 +98,39 @@ SMC.cmd = (function () {
         if (args.length < 2) return line('Usage: login <username> <password>', 'err');
         var u = args[0], p = args.slice(1).join(' ');
         line('Signing in...', 'sys');
-        api.login(u, p).then(function (d) { line('Welcome, ' + d.user.name + '.', 'ok'); close(); SMC.app.boot(d.user); }).catch(function (e) { line(e.message || 'Login failed.', 'err'); });
+        api.login(u, p).then(function (d) {
+            if (d && d.token) { line('Welcome, ' + d.user.name + '.', 'ok'); close(); SMC.app.boot(d.user); return; }
+            if (d && d.twofa === 'code_sent') {
+                pend2fa = { u: u, p: p };
+                line('A verification code was emailed to ' + (d.emailMasked || 'your email') + '.', 'sys');
+                line('Enter it with:  code <the 6-digit code>', 'sys');
+                return;
+            }
+            if (d && d.twofa === 'email_required') {
+                pend2fa = { u: u, p: p };
+                line('No email is on file for this account.', 'sys');
+                line('Add one with:  setemail <your email>', 'sys');
+                return;
+            }
+            line('Sign-in failed.', 'err');
+        }).catch(function (e) { line(e.message || 'Login failed.', 'err'); });
+    }
+    function doCmd2fa(args) {
+        if (!pend2fa) return line('Run login first.', 'err');
+        if (args.length < 1) return line('Usage: code <the 6-digit code>', 'err');
+        line('Verifying...', 'sys');
+        api.verify2fa(pend2fa.u, pend2fa.p, args[0], true).then(function (d) {
+            pend2fa = null; line('Welcome, ' + d.user.name + '.', 'ok'); close(); SMC.app.boot(d.user);
+        }).catch(function (e) { line(e.message || 'Verification failed.', 'err'); });
+    }
+    function doCmdSetEmail(args) {
+        if (!pend2fa) return line('Run login first.', 'err');
+        if (args.length < 1) return line('Usage: setemail <your email>', 'err');
+        line('Sending code...', 'sys');
+        api.set2faEmail(pend2fa.u, pend2fa.p, args[0]).then(function (d) {
+            line('A verification code was emailed to ' + (d.emailMasked || args[0]) + '.', 'sys');
+            line('Enter it with:  code <the 6-digit code>', 'sys');
+        }).catch(function (e) { line(e.message || 'Could not send code.', 'err'); });
     }
     function doUnlock(args) {
         if (!args.length) return line('Usage: unlock <code>', 'err');
@@ -112,6 +149,12 @@ SMC.cmd = (function () {
         }
         var msg = args.join(' ');
         api.setSiteMaint(true, msg).then(function () { line('Maintenance mode ON. Everyone else now sees: "' + msg + '"', 'ok'); }).catch(function (e) { line(e.message || 'Failed.', 'err'); });
+    }
+    function doClearMessages() {
+        var u = curUser();
+        if (!(u && u.role === 'admin')) return line('Admin sign-in required to clear messages.', 'err');
+        if (!window.confirm('Delete ALL chat messages for everyone? This cannot be undone.')) return line('Cancelled.', 'sys');
+        api.clearMessages().then(function () { line('All chat messages have been deleted.', 'ok'); }).catch(function (e) { line(e.message || 'Failed.', 'err'); });
     }
     function goAdmin() {
         var u = curUser();
