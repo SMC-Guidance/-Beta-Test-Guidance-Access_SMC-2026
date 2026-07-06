@@ -825,8 +825,16 @@ function sendTwoFactorCode(u, deviceId) {
     };
     props().setProperty('TFA_' + u.username.toLowerCase(), JSON.stringify(rec));
     var subject = 'Your SMC Guidance sign-in code';
-    var body = 'Your SMC Guidance verification code is ' + code + '. It expires in 10 minutes. If you did not try to sign in, you can ignore this email.';
-    MailApp.sendEmail(u.email, subject, body);
+    var body = 'Your SMC Guidance verification code is ' + code + '. It expires in 10 minutes. If you did not try to sign in, you can ignore this email.\n\nThis is an automated message. Please do not reply.';
+    // Send with a customizable no-reply sender name. MAIL_FROM_NAME sets the
+    // display name; MAIL_REPLY_TO (optional) routes replies somewhere. On
+    // Google Workspace, noReply uses a true generic no-reply address; on a
+    // consumer Gmail it gracefully falls back (address stays your Gmail, but
+    // the display name still shows the no-reply label).
+    var options = { name: prop('MAIL_FROM_NAME', 'SMC Guidance (no-reply)'), noReply: true };
+    var replyTo = prop('MAIL_REPLY_TO', '');
+    if (replyTo) { options.replyTo = replyTo; options.noReply = false; }
+    MailApp.sendEmail(u.email, subject, body, options);
 }
 function handleVerify2fa(p) {
     if (secIsLocked())
