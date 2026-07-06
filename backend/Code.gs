@@ -826,15 +826,34 @@ function sendTwoFactorCode(u, deviceId) {
     props().setProperty('TFA_' + u.username.toLowerCase(), JSON.stringify(rec));
     var subject = 'Your SMC Guidance sign-in code';
     var body = 'Your SMC Guidance verification code is ' + code + '. It expires in 10 minutes. If you did not try to sign in, you can ignore this email.\n\nThis is an automated message. Please do not reply.';
-    // Send with a customizable no-reply sender name. MAIL_FROM_NAME sets the
-    // display name; MAIL_REPLY_TO (optional) routes replies somewhere. On
-    // Google Workspace, noReply uses a true generic no-reply address; on a
-    // consumer Gmail it gracefully falls back (address stays your Gmail, but
-    // the display name still shows the no-reply label).
-    var options = { name: prop('MAIL_FROM_NAME', 'SMC Guidance (no-reply)'), noReply: true };
+    sendAppEmail(u.email, subject, body);
+}
+// Central mailer for all app emails (2FA codes, auth test).
+// - MAIL_FROM      : optional "Send mail as" alias to send FROM (hides your
+//                    personal Gmail). Only used if it is a verified alias.
+// - MAIL_FROM_NAME : display name (default "SMC Guidance (no-reply)").
+// - MAIL_REPLY_TO  : optional reply-to address.
+function sendAppEmail(to, subject, body) {
+    var fromName = prop('MAIL_FROM_NAME', 'SMC Guidance (no-reply)');
+    var fromAlias = prop('MAIL_FROM', '');
     var replyTo = prop('MAIL_REPLY_TO', '');
+    // Preferred path: GmailApp can send FROM a verified alias (MailApp cannot),
+    // so the recipient never sees the personal address running the script.
+    if (fromAlias) {
+        var aliases = [];
+        try { aliases = GmailApp.getAliases(); } catch (e) { aliases = []; }
+        if (aliases.indexOf(fromAlias) !== -1) {
+            var gOpts = { from: fromAlias, name: fromName };
+            if (replyTo) gOpts.replyTo = replyTo;
+            GmailApp.sendEmail(to, subject, body, gOpts);
+            return;
+        }
+    }
+    // Fallback: MailApp (sends from the script owner's address). noReply becomes
+    // a true no-reply on Google Workspace; on consumer Gmail only the name shows.
+    var options = { name: fromName, noReply: true };
     if (replyTo) { options.replyTo = replyTo; options.noReply = false; }
-    MailApp.sendEmail(u.email, subject, body, options);
+    MailApp.sendEmail(to, subject, body, options);
 }
 function handleVerify2fa(p) {
     if (secIsLocked())
@@ -1959,6 +1978,6 @@ function handleRevokeShare(session, p){
 
 function authorizeNow() {
   var to = Session.getEffectiveUser().getEmail();
-  MailApp.sendEmail(to, 'SMC Guidance - email is now authorized', 'This confirms MailApp.sendEmail is authorized. Two-factor codes can now be emailed. You may close this.');
+  sendAppEmail(to, 'SMC Guidance - email is now authorized', 'This confirms email sending is authorized. Two-factor codes can now be emailed. You may close this.');
   return 'Test email sent to ' + to;
 }
