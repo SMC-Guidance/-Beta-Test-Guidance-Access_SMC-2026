@@ -60,6 +60,10 @@ function doPost(e) {
             case 'setPresenceMode': return ok(handleSetPresenceMode(requireStaff(session), payload));
             case 'setPublicKey': return ok(handleSetPublicKey(requireAuth(session), payload));
             case 'getPublicKey': return ok(handleGetPublicKey(requireAuth(session), payload));
+            case 'adminThread': return ok(handleAdminThread(requireStaff(session), payload));
+            case 'unsendMessage': return ok(handleUnsendMessage(requireAuth(session), payload));
+            case 'getSiteMaint': return ok(handleGetSiteMaint());
+            case 'setSiteMaint': return ok(handleSetSiteMaint(requireAdmin(session), payload));
             default: return fail('Unknown action.', 'BAD_REQUEST');
         }
     }
@@ -96,6 +100,20 @@ function handleSetMaintenance(session, p) {
         delete map[view];
     props().setProperty('MAINTENANCE', JSON.stringify(map));
     return { maintenance: map };
+}
+function handleGetSiteMaint() {
+    var raw = prop('SITE_MAINT', '{}');
+    var m;
+    try { m = JSON.parse(raw) || {}; } catch (e) { m = {}; }
+    return { on: !!m.on, message: String(m.message || ''), by: String(m.by || ''), ts: String(m.ts || '') };
+}
+function handleSetSiteMaint(session, p) {
+    var on = !!(p && p.on);
+    var message = String(p && p.message || '').trim();
+    if (message.length > 500) message = message.slice(0, 500);
+    var m = { on: on, message: message, by: session.username, ts: new Date().toISOString() };
+    props().setProperty('SITE_MAINT', JSON.stringify(m));
+    return { on: m.on, message: m.message, by: m.by, ts: m.ts };
 }
 var PROFILE_HEADERS = ['username', 'name', 'role', 'notes', 'photo', 'updatedAt'];
 function profileSheet() { return sheetOrCreate('Profiles', PROFILE_HEADERS); }
@@ -280,6 +298,7 @@ function readPresence() {
 function handleChatPoll(session) {
     var me = session.username;
     touchPresence(me);
+    var meIsStaff = isStaffRole(session.role);
     var users = readUsers();
     var pres = readPresence();
     var flags = readChatFlags();
@@ -290,6 +309,7 @@ function handleChatPoll(session) {
     for (var i = 0; i < users.length; i++) {
         var u = users[i];
         if (String(u.username).toLowerCase() === String(me).toLowerCase()) continue;
+        if (!meIsStaff && isStaffRole(u.role)) continue;
         var unread = 0, lastTs = '', lastText = '';
         for (var r = 1; r < msgs.length; r++) {
             var f = String(msgs[r][1] || ''), t = String(msgs[r][2] || '');
@@ -310,9 +330,18 @@ function handleChatPoll(session) {
         contacts.push({ username: u.username, name: u.name, role: u.role, online: !!online, lastSeen: lastSeenIso, unread: unread, lastTs: lastTs, lastText: lastText, muted: !!fl.muted });
     }
     contacts.sort(function (a, b) { return String(b.lastTs || '').localeCompare(String(a.lastTs || '')); });
+    var ann = null;
+    for (var ar = 1; ar < msgs.length; ar++) {
+        if (String(msgs[ar][2] || '') === me && String(msgs[ar][6] || '') === 'announcement') {
+            var atext = String(msgs[ar][3] || '');
+            if (!atext) continue;
+            var ats = String(msgs[ar][4] || '');
+            if (!ann || ats > ann.ts) ann = { id: String(msgs[ar][0] || ''), from: String(msgs[ar][1] || ''), text: atext, ts: ats };
+        }
+    }
     var myFlags = flags[String(me).toLowerCase()] || {};
     var myMode = myFlags.mode || (isStaffRole(session.role) ? 'invisible' : 'normal');
-    return { me: me, myRole: session.role, myName: session.name || me, myMode: myMode, contacts: contacts, totalUnread: totalUnread };
+    return { me: me, myRole: session.role, myName: session.name || me, myMode: myMode, contacts: contacts, totalUnread: totalUnread, announcement: ann };
 }
 function handleGetThread(session, p) {
     var me = session.username;
@@ -411,16 +440,24 @@ function handleChatBroadcast(session, p) {
     var text = String(p && p.text || '').trim();
     if (!text) throw httpError('Announcement cannot be empty.', 'BAD_REQUEST');
     if (text.length > 2000) text = text.slice(0, 2000);
-    var users = readUsers();
+    var to = String(p && p.to || '').trim();
     var sh = messageSheet();
     var now = new Date().toISOString();
     var base = Date.now();
     var sent = 0;
-    for (var i = 0; i < users.length; i++) {
-        var u = users[i];
-        if (String(u.username).toLowerCase() === String(me).toLowerCase()) continue;
-        sh.appendRow(['a' + base + '_' + i, me, u.username, text, now, '', 'announcement']);
-        sent++;
+    if (to) {
+        var target = findUser(to);
+        if (!target) throw httpError('That person could not be found.', 'NOT_FOUND');
+        sh.appendRow(['a' + base + '_0', me, target.username, text, now, '', 'announcement']);
+        sent = 1;
+    } else {
+        var users = readUsers();
+        for (var i = 0; i < users.length; i++) {
+            var u = users[i];
+            if (String(u.username).toLowerCase() === String(me).toLowerCase()) continue;
+            sh.appendRow(['a' + base + '_' + i, me, u.username, text, now, '', 'announcement']);
+            sent++;
+        }
     }
     return { sent: sent };
 }
@@ -431,6 +468,22 @@ function handleDeleteMessage(session, p) {
     var vals = sh.getDataRange().getValues();
     for (var r = 1; r < vals.length; r++) {
         if (String(vals[r][0] || '') === id) {
+            sh.getRange(r + 1, 4).setValue('');
+            sh.getRange(r + 1, 7).setValue('removed');
+            return { ok: true, id: id };
+        }
+    }
+    throw httpError('Message not found.', 'NOT_FOUND');
+}
+function handleUnsendMessage(session, p) {
+    var id = String(p && p.id || '').trim();
+    if (!id) throw httpError('Message id required.', 'BAD_REQUEST');
+    var me = String(session.username || '').toLowerCase();
+    var sh = messageSheet();
+    var vals = sh.getDataRange().getValues();
+    for (var r = 1; r < vals.length; r++) {
+        if (String(vals[r][0] || '') === id) {
+            if (String(vals[r][1] || '').toLowerCase() !== me) throw httpError('You can only unsend your own messages.', 'FORBIDDEN');
             sh.getRange(r + 1, 4).setValue('');
             sh.getRange(r + 1, 7).setValue('removed');
             return { ok: true, id: id };

@@ -94,11 +94,13 @@ SMC.api = (function () {
         getThread: function (withUser) { return call('getThread', { withUser: withUser }); },
         sendMessage: function (to, text) { return call('sendMessage', { to: to, text: text }); },
         chatDirectory: function () { return call('chatDirectory', {}); },
-        broadcast: function (text) { return call('chatBroadcast', { text: text }); },
+        broadcast: function (text, to) { return call('chatBroadcast', { text: text, to: to || '' }); },
         deleteMessage: function (id) { return call('deleteMessage', { id: id }); },
+        unsendMessage: function (id) { return call('unsendMessage', { id: id }); },
         setChatMute: function (username, muted) { return call('setChatMute', { username: username, muted: muted }); },
         setPresenceMode: function (mode) { return call('setPresenceMode', { mode: mode }); },
-        setPublicKey: function (publicKey) { return call('setPublicKey', { publicKey: publicKey }); },
-        getPublicKey: function (username) { return call('getPublicKey', { username: username }); }
+        adminThread: function (userA, userB) { return call('adminThread', { userA: userA, userB: userB }); },
+        getSiteMaint: function () { return call('getSiteMaint', {}); },
+        setSiteMaint: function (on, message) { return call('setSiteMaint', { on: !!on, message: message || '' }); }
     };
 })();
