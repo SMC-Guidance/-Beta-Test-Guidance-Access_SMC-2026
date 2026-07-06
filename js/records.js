@@ -218,6 +218,8 @@ SMC.records = (function () {
             SMC.exporter.print(activeRow); });
         document.getElementById('mPdfBtn').addEventListener('click', function () { if (activeRow)
             SMC.exporter.pdf(activeRow); });
+        var mShareBtn = document.getElementById('mShareBtn');
+        if (mShareBtn) mShareBtn.addEventListener('click', function () { if (activeRow && SMC.share) SMC.share.open('record', 'Counseling Record - ' + (activeRow.name || ''), SMC.exporter.buildHtml(activeRow), {}); });
     }
     return { setData: setData, bind: bind };
 })();

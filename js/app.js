@@ -328,6 +328,8 @@ SMC.app = (function () {
         SMC.charts.destroy();
     }
     function init() {
+        if (SMC.share && SMC.share.check()) return;
+        if (SMC.share && SMC.share.bind) SMC.share.bind();
         SMC.auth.bind();
         SMC.records.bind();
         bindCounselors();

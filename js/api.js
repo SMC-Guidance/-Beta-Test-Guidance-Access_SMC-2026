@@ -125,6 +125,10 @@ SMC.api = (function () {
         setChatMute: function (username, muted) { return call('setChatMute', { username: username, muted: muted }); },
         setPresenceMode: function (mode) { return call('setPresenceMode', { mode: mode }); },
         getSiteMaint: function () { return call('getSiteMaint', {}); },
-        setSiteMaint: function (on, message) { return call('setSiteMaint', { on: !!on, message: message || '' }); }
+        setSiteMaint: function (on, message) { return call('setSiteMaint', { on: !!on, message: message || '' }); },
+        createShare: function (data) { return call('createShare', data || {}); },
+        getShared: function (token) { return call('getShared', { token: token }); },
+        listShares: function () { return call('listShares', {}); },
+        revokeShare: function (token) { return call('revokeShare', { token: token }); }
     };
 })();

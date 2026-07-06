@@ -2,7 +2,7 @@
 window.SMC = window.SMC || {};
 SMC.exporter = (function () {
     var ui = SMC.ui;
-    function print(r) {
+    function buildHtml(r) {
         var today = new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
         function pf(label, val) {
             if (!val || !String(val).trim())
@@ -14,8 +14,7 @@ SMC.exporter = (function () {
                 return '';
             return '<div class="pr-long"><div class="pr-label">' + ui.esc(label) + '</div><div class="pr-value">' + ui.esc(val) + '</div></div>';
         }
-        document.getElementById('printArea').innerHTML =
-            '<div class="pr-header"><h1>Stella Maris College \u2014 Guidance Office</h1>' +
+        return '<div class="pr-header"><h1>Stella Maris College \u2014 Guidance Office</h1>' +
                 '<p>Student Counseling Record \u2022 Printed ' + ui.esc(today) + '</p></div>' +
                 '<div class="pr-section"><div class="pr-section-title">Student Information</div><div class="pr-grid">' +
                 pf('Full Name', r.name) + pf('Grade & Section', r.grade) + pf('Age', r.age) +
@@ -34,6 +33,9 @@ SMC.exporter = (function () {
                 pfl('Student Report', r.studentReport) + pfl('Actions Taken', r.actionsTaken) + pfl('Progress Evaluation', r.progressEvaluation) +
                 '</div></div>' +
                 '<div class="pr-sig"><div class="pr-sig-block">Guidance Designate Signature</div><div class="pr-sig-block">Date</div></div>';
+    }
+    function print(r) {
+        document.getElementById('printArea').innerHTML = buildHtml(r);
         document.getElementById('printArea').style.display = 'block';
         window.print();
         setTimeout(function () { document.getElementById('printArea').style.display = 'none'; }, 1500);
@@ -161,5 +163,5 @@ SMC.exporter = (function () {
         doc.save(fname);
         ui.toast('PDF saved successfully.', 'ok');
     }
-    return { print: print, pdf: pdf };
+    return { print: print, pdf: pdf, buildHtml: buildHtml };
 })();

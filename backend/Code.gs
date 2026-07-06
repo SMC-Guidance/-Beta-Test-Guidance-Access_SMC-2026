@@ -67,6 +67,10 @@ function doPost(e) {
             case 'getSiteMaint': return ok(handleGetSiteMaint());
             case 'setSiteMaint': return ok(handleSetSiteMaint(requireAdmin(session), payload));
             case 'clearMessages': return ok(handleClearMessages(requireAdmin(session)));
+            case 'createShare': return ok(handleCreateShare(requireAuth(session), payload));
+            case 'getShared': return ok(handleGetShared(payload));
+            case 'listShares': return ok(handleListShares(requireStaff(session)));
+            case 'revokeShare': return ok(handleRevokeShare(requireStaff(session), payload));
             default: return fail('Unknown action.', 'BAD_REQUEST');
         }
     }
@@ -1815,4 +1819,93 @@ function handleDeleteIncident(session, p) {
     var c = incidentCols(values);
     for (var r = 1; r < values.length; r++) { if (String(values[r][c.id]).trim() === id) { sh.deleteRow(r + 1); return { removed: true }; } }
     throw httpError('Incident not found.', 'NOT_FOUND');
+}
+
+var SHARE_HEADERS = ['token','type','title','bodyClass','full','html','createdBy','createdAt','expiresAt','revoked'];
+function shareSheet(){ return sheetOrCreate('Shares', SHARE_HEADERS); }
+function shareCols(values){
+    var head = values[0].map(function(h){ return String(h).trim().toLowerCase(); });
+    return { token: head.indexOf('token'), type: head.indexOf('type'), title: head.indexOf('title'), bodyClass: head.indexOf('bodyclass'), full: head.indexOf('full'), html: head.indexOf('html'), createdBy: head.indexOf('createdby'), createdAt: head.indexOf('createdat'), expiresAt: head.indexOf('expiresat'), revoked: head.indexOf('revoked') };
+}
+function handleCreateShare(session, p){
+    var type = String(p.type || '').trim();
+    var allowed = { record:1, incident:1, classlist:1, evaluation:1 };
+    if(!allowed[type]) throw httpError('Unknown document type.', 'BAD_REQUEST');
+    var html = String(p.html || '');
+    if(!html.trim()) throw httpError('Nothing to share.', 'BAD_REQUEST');
+    if(html.length > 48000) throw httpError('This document is too large to share as a link. Print it to PDF instead.', 'TOO_LARGE');
+    var sh = shareSheet();
+    var values = sh.getDataRange().getValues();
+    var c = shareCols(values);
+    var width = values[0].length;
+    var now = new Date();
+    var days = parseInt(prop('SHARE_TTL_DAYS','7'), 10) || 7;
+    var exp = new Date(now.getTime() + days * 86400000);
+    var token = randomToken(20);
+    var row = [];
+    for(var i=0;i<width;i++) row[i] = '';
+    function setC(idx,val){ if(idx>=0) row[idx] = val==null ? '' : val; }
+    setC(c.token, token);
+    setC(c.type, type);
+    setC(c.title, String(p.title||'').slice(0,200));
+    setC(c.bodyClass, String(p.bodyClass||'').slice(0,60));
+    setC(c.full, p.full ? 'yes' : '');
+    setC(c.html, html);
+    setC(c.createdBy, session.name || session.username);
+    setC(c.createdAt, Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'));
+    setC(c.expiresAt, exp.toISOString());
+    setC(c.revoked, '');
+    sh.appendRow(row);
+    return { token: token, expiresAt: exp.toISOString() };
+}
+function handleGetShared(p){
+    var token = String(p.token||'').trim();
+    if(!token) throw httpError('This link is invalid.', 'NOT_FOUND');
+    var sh = shareSheet();
+    var values = sh.getDataRange().getValues();
+    var c = shareCols(values);
+    for(var r=1;r<values.length;r++){
+        if(String(values[r][c.token]).trim() === token){
+            var row = values[r];
+            if(String(row[c.revoked]).trim()) throw httpError('This link has been revoked.', 'GONE');
+            var expStr = String(row[c.expiresAt]).trim();
+            var exp = expStr ? new Date(expStr) : null;
+            if(exp && !isNaN(exp.getTime()) && exp.getTime() < Date.now()) throw httpError('This link has expired.', 'GONE');
+            return { type: String(row[c.type]||''), title: String(row[c.title]||''), bodyClass: String(row[c.bodyClass]||''), full: !!String(row[c.full]).trim(), html: String(row[c.html]||''), expiresAt: expStr };
+        }
+    }
+    throw httpError('This link is invalid or has been removed.', 'NOT_FOUND');
+}
+function handleListShares(session){
+    var sh = shareSheet();
+    var values = sh.getDataRange().getValues();
+    if(values.length < 2) return [];
+    var c = shareCols(values);
+    var out = [];
+    var now = Date.now();
+    for(var r=1;r<values.length;r++){
+        var row = values[r];
+        var tok = String(row[c.token]||'').trim();
+        if(!tok) continue;
+        var expStr = String(row[c.expiresAt]||'').trim();
+        var exp = expStr ? new Date(expStr) : null;
+        var expired = exp && !isNaN(exp.getTime()) && exp.getTime() < now;
+        out.push({ token: tok, type: String(row[c.type]||''), title: String(row[c.title]||''), createdBy: String(row[c.createdBy]||''), createdAt: String(row[c.createdAt]||''), expiresAt: expStr, revoked: !!String(row[c.revoked]).trim(), expired: !!expired });
+    }
+    out.sort(function(a,b){ return (a.createdAt < b.createdAt) ? 1 : -1; });
+    return out;
+}
+function handleRevokeShare(session, p){
+    var token = String(p.token||'').trim();
+    if(!token) throw httpError('Link id required.', 'BAD_REQUEST');
+    var sh = shareSheet();
+    var values = sh.getDataRange().getValues();
+    var c = shareCols(values);
+    for(var r=1;r<values.length;r++){
+        if(String(values[r][c.token]).trim() === token){
+            if(c.revoked>=0) sh.getRange(r+1, c.revoked+1).setValue('yes');
+            return { revoked: true };
+        }
+    }
+    throw httpError('Link not found.', 'NOT_FOUND');
 }
