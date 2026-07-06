@@ -1909,3 +1909,9 @@ function handleRevokeShare(session, p){
     }
     throw httpError('Link not found.', 'NOT_FOUND');
 }
+
+function authorizeNow() {
+  var to = Session.getEffectiveUser().getEmail();
+  MailApp.sendEmail(to, 'SMC Guidance - email is now authorized', 'This confirms MailApp.sendEmail is authorized. Two-factor codes can now be emailed. You may close this.');
+  return 'Test email sent to ' + to;
+}
