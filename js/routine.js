@@ -1,0 +1,281 @@
+"use strict";
+window.SMC = window.SMC || {};
+SMC.routine = (function () {
+	var ui = SMC.ui;
+	var user = null;
+	var LS_KEY = "smc-routine-interviews";
+	var STATUSES = ["Pending", "Scheduled", "Done"];
+	var LEVEL_ORDER = ["Kinder", "Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5", "Grade 6", "Grade 7", "Grade 8", "Grade 9", "Grade 10", "Grade 11", "Grade 12"];
+	var DESIGNATES = [
+		{ id: "mamaril", name: "Ms. Mamaril", levels: ["Grade 12", "Grade 7", "Grade 6"] },
+		{ id: "quilatan", name: "Ms. Quilatan", levels: ["Grade 9", "Grade 8", "Kinder"] },
+		{ id: "gundran", name: "Ms. Gundran", levels: ["Grade 11", "Grade 5", "Grade 2", "Grade 1"] },
+		{ id: "reyes", name: "Mr. Reyes", levels: ["Grade 10", "Grade 4", "Grade 3"] }
+	];
+	var state = { desig: "all", level: "", section: "", status: "", q: "" };
+	var records = load();
+
+	function esc(s) { return (ui && ui.esc) ? ui.esc(s) : String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
+	function load() { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}") || {}; } catch (e) { return {}; } }
+	function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(records)); } catch (e) { } }
+	function recOf(lrn) { var r = records[lrn] || {}; return { status: r.status || "Pending", date: r.date || "", notes: r.notes || "" }; }
+	function setRec(lrn, patch) { var r = recOf(lrn); if (patch.status != null) r.status = patch.status; if (patch.date != null) r.date = patch.date; if (patch.notes != null) r.notes = patch.notes; records[lrn] = r; save(); }
+
+	function setUser(u) { user = u; }
+	function levelIdx(l) { var i = LEVEL_ORDER.indexOf(l); return i < 0 ? 999 : i; }
+	function desigOf(id) { for (var i = 0; i < DESIGNATES.length; i++) if (DESIGNATES[i].id === id) return DESIGNATES[i]; return null; }
+	function levelDesig(level) { for (var i = 0; i < DESIGNATES.length; i++) if (DESIGNATES[i].levels.indexOf(level) !== -1) return DESIGNATES[i]; return null; }
+	function host() { return document.getElementById("routineView"); }
+
+	function allStudents() {
+		var data = SMC.classListData || [];
+		var out = [];
+		data.forEach(function (sec) {
+			(sec.students || []).forEach(function (st) {
+				out.push({ name: st.name, lrn: st.lrn, sex: st.sex, level: sec.level, section: sec.section });
+			});
+		});
+		return out;
+	}
+	function scopeStudents() {
+		var d = state.desig === "all" ? null : desigOf(state.desig);
+		return allStudents().filter(function (s) { return d ? d.levels.indexOf(s.level) !== -1 : true; });
+	}
+	function sortStudents(list) {
+		return list.slice().sort(function (a, b) {
+			var d = levelIdx(a.level) - levelIdx(b.level);
+			if (d !== 0) return d;
+			if (a.section !== b.section) return a.section.localeCompare(b.section);
+			return a.name.localeCompare(b.name);
+		});
+	}
+	function statusCounts(list) {
+		var c = { total: list.length, Done: 0, Scheduled: 0, Pending: 0 };
+		list.forEach(function (s) { c[recOf(s.lrn).status]++; });
+		return c;
+	}
+	function pct(c) { return c.total ? Math.round(c.Done / c.total * 100) : 0; }
+	function stCls(s) { return s === "Done" ? "done" : s === "Scheduled" ? "sched" : "pending"; }
+	function desigLevels() {
+		if (state.desig === "all") return "";
+		var d = desigOf(state.desig);
+		if (!d) return "";
+		return d.levels.slice().sort(function (a, b) { return levelIdx(a) - levelIdx(b); }).join(", ");
+	}
+
+	function render() {
+		var el = host();
+		if (!el) return;
+		el.innerHTML =
+			'<div class="ri-wrap">' +
+			'<header class="ri-head">' +
+			'<div class="ri-head-l">' +
+			'<span class="ri-head-ic"><svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>' +
+			'<div><h2 class="ri-head-t">Routine Interviews</h2><p class="ri-head-s">Track each student\'s routine interview \u2014 a one-on-one conversation about their life \u2014 organised by grade-level designate.</p></div>' +
+			'</div>' +
+			'<div class="ri-head-r"><button class="ri-btn primary" id="riPrint"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg> Print list</button></div>' +
+			'</header>' +
+			'<div class="ri-tabs" id="riTabs"></div>' +
+			'<div class="ri-summary" id="riSummary"></div>' +
+			'<div class="ri-tools">' +
+			'<div class="ri-search-wrap"><svg class="ri-search-ic" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg><input type="text" id="riSearch" class="ri-search" placeholder="Search student name or Student Number"></div>' +
+			'<select id="riLevel" class="ri-filter"></select>' +
+			'<select id="riSection" class="ri-filter"></select>' +
+			'<select id="riStatusF" class="ri-filter"><option value="">All statuses</option>' + STATUSES.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('') + '</select>' +
+			'</div>' +
+			'<div class="ri-tbl-wrap"><table class="ri-tbl"><thead id="riHead"></thead><tbody id="riTbody"></tbody></table></div>' +
+			'</div>';
+		buildFilters();
+		bind();
+		refresh();
+	}
+
+	function buildTabs() {
+		var tabs = document.getElementById("riTabs");
+		if (!tabs) return;
+		function chip(id, name, list) {
+			var c = statusCounts(list);
+			return '<button type="button" class="ri-tab' + (state.desig === id ? ' on' : '') + '" data-d="' + id + '">' +
+				'<span class="ri-tab-nm">' + esc(name) + '</span>' +
+				'<span class="ri-tab-mt">' + c.Done + '/' + c.total + ' done</span>' +
+				'</button>';
+		}
+		var html = chip("all", "All designates", allStudents());
+		DESIGNATES.forEach(function (d) {
+			var list = allStudents().filter(function (s) { return d.levels.indexOf(s.level) !== -1; });
+			html += chip(d.id, d.name, list);
+		});
+		tabs.innerHTML = html;
+	}
+
+	function buildFilters() {
+		var scope = scopeStudents();
+		var levels = [];
+		scope.forEach(function (s) { if (levels.indexOf(s.level) === -1) levels.push(s.level); });
+		levels.sort(function (a, b) { return levelIdx(a) - levelIdx(b); });
+		var lvlSel = document.getElementById("riLevel");
+		if (lvlSel) {
+			if (levels.indexOf(state.level) === -1) state.level = "";
+			lvlSel.innerHTML = '<option value="">All year levels</option>' + levels.map(function (l) { return '<option value="' + esc(l) + '"' + (state.level === l ? ' selected' : '') + '>' + esc(l) + '</option>'; }).join('');
+		}
+		var secs = [];
+		scope.forEach(function (s) { if ((!state.level || s.level === state.level) && secs.indexOf(s.section) === -1) secs.push(s.section); });
+		secs.sort(function (a, b) { return a.localeCompare(b); });
+		var secSel = document.getElementById("riSection");
+		if (secSel) {
+			if (secs.indexOf(state.section) === -1) state.section = "";
+			secSel.innerHTML = '<option value="">All sections</option>' + secs.map(function (s) { return '<option value="' + esc(s) + '"' + (state.section === s ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('');
+		}
+	}
+
+	function updateSummary() {
+		var box = document.getElementById("riSummary");
+		if (!box) return;
+		var c = statusCounts(scopeStudents());
+		var p = pct(c);
+		var label = state.desig === "all" ? "All designates" : (desigOf(state.desig) ? desigOf(state.desig).name : "");
+		box.innerHTML =
+			'<div class="ri-sum-top"><div class="ri-sum-title">' + esc(label) + '<span class="ri-sum-lv">' + esc(desigLevels()) + '</span></div>' +
+			'<div class="ri-sum-pct">' + p + '% interviewed</div></div>' +
+			'<div class="ri-bar"><span style="width:' + p + '%"></span></div>' +
+			'<div class="ri-sum-stats">' +
+			'<span class="ri-stat"><strong>' + c.total + '</strong> students</span>' +
+			'<span class="ri-stat done"><strong>' + c.Done + '</strong> done</span>' +
+			'<span class="ri-stat sched"><strong>' + c.Scheduled + '</strong> scheduled</span>' +
+			'<span class="ri-stat pending"><strong>' + c.Pending + '</strong> pending</span>' +
+			'</div>';
+	}
+
+	function buildHead() {
+		var head = document.getElementById("riHead");
+		if (!head) return;
+		var showD = state.desig === "all";
+		head.innerHTML = '<tr><th>#</th><th>Student</th>' + (showD ? '<th>Designate</th>' : '') + '<th>Grade &amp; Section</th><th>Sex</th><th>Status</th><th>Interview date</th><th>Notes</th></tr>';
+	}
+
+	function drawRows() {
+		var tb = document.getElementById("riTbody");
+		if (!tb) return;
+		var showD = state.desig === "all";
+		var q = (state.q || "").toLowerCase().trim();
+		var list = sortStudents(scopeStudents().filter(function (s) {
+			if (state.level && s.level !== state.level) return false;
+			if (state.section && s.section !== state.section) return false;
+			if (state.status && recOf(s.lrn).status !== state.status) return false;
+			if (q && (s.name + " " + s.lrn).toLowerCase().indexOf(q) === -1) return false;
+			return true;
+		}));
+		var colspan = showD ? 8 : 7;
+		if (!list.length) { tb.innerHTML = '<tr><td colspan="' + colspan + '" class="ri-empty">No students match your filters.</td></tr>'; return; }
+		tb.innerHTML = list.map(function (s, idx) {
+			var r = recOf(s.lrn);
+			var d = levelDesig(s.level);
+			var opts = STATUSES.map(function (st) { return '<option value="' + st + '"' + (r.status === st ? ' selected' : '') + '>' + st + '</option>'; }).join('');
+			var note = r.notes ? '<span class="ri-note-has">' + esc(r.notes.length > 40 ? r.notes.slice(0, 40) + "\u2026" : r.notes) + '</span>' : '<span class="ri-note-add">+ Add note</span>';
+			return '<tr data-lrn="' + esc(s.lrn) + '">' +
+				'<td class="ri-num">' + (idx + 1) + '</td>' +
+				'<td class="ri-nm">' + esc(s.name) + '<span class="ri-lrn">' + esc(s.lrn) + '</span></td>' +
+				(showD ? '<td class="ri-desig">' + esc(d ? d.name : "\u2014") + '</td>' : '') +
+				'<td>' + esc(s.level) + ' \u00b7 ' + esc(s.section) + '</td>' +
+				'<td>' + esc(s.sex) + '</td>' +
+				'<td><select class="ri-status ri-st-' + stCls(r.status) + '" data-lrn="' + esc(s.lrn) + '">' + opts + '</select></td>' +
+				'<td><input type="date" class="ri-date" data-lrn="' + esc(s.lrn) + '" value="' + esc(r.date) + '"></td>' +
+				'<td><button type="button" class="ri-note-btn" data-lrn="' + esc(s.lrn) + '">' + note + '</button></td>' +
+				'</tr>';
+		}).join('');
+	}
+
+	function refresh() { buildTabs(); updateSummary(); buildHead(); drawRows(); }
+
+	function bind() {
+		var tabs = document.getElementById("riTabs");
+		if (tabs) tabs.addEventListener("click", function (e) {
+			var b = e.target.closest(".ri-tab"); if (!b) return;
+			state.desig = b.getAttribute("data-d"); state.level = ""; state.section = "";
+			buildFilters(); refresh();
+		});
+		var s = document.getElementById("riSearch"); if (s) s.addEventListener("input", function () { state.q = this.value; drawRows(); });
+		var lv = document.getElementById("riLevel"); if (lv) lv.addEventListener("change", function () { state.level = this.value; buildFilters(); drawRows(); });
+		var sec = document.getElementById("riSection"); if (sec) sec.addEventListener("change", function () { state.section = this.value; drawRows(); });
+		var stf = document.getElementById("riStatusF"); if (stf) stf.addEventListener("change", function () { state.status = this.value; drawRows(); });
+		var tb = document.getElementById("riTbody");
+		if (tb) {
+			tb.addEventListener("change", function (e) {
+				var sel = e.target.closest("select.ri-status");
+				if (sel) { setRec(sel.getAttribute("data-lrn"), { status: sel.value }); sel.className = "ri-status ri-st-" + stCls(sel.value); updateSummary(); buildTabs(); if (state.status) drawRows(); return; }
+				var dt = e.target.closest("input.ri-date");
+				if (dt) { setRec(dt.getAttribute("data-lrn"), { date: dt.value }); return; }
+			});
+			tb.addEventListener("click", function (e) {
+				var nb = e.target.closest(".ri-note-btn");
+				if (nb) openNote(nb.getAttribute("data-lrn"));
+			});
+		}
+		var pr = document.getElementById("riPrint"); if (pr) pr.addEventListener("click", printList);
+	}
+
+	function noteModal() {
+		var m = document.getElementById("riNoteModal");
+		if (m) return m;
+		m = document.createElement("div");
+		m.id = "riNoteModal"; m.className = "ri-modal";
+		m.innerHTML = '<div class="ri-modal-card">' +
+			'<div class="ri-modal-h"><span id="riNoteName"></span><button class="ri-modal-x" id="riNoteX">&times;</button></div>' +
+			'<label class="ri-modal-lb">Interview notes</label>' +
+			'<textarea id="riNoteText" class="ri-modal-in" rows="5" placeholder="What did you talk about? Concerns, follow-ups, observations\u2026"></textarea>' +
+			'<div class="ri-modal-ft"><button class="ri-btn ghost" id="riNoteCancel">Cancel</button><button class="ri-btn primary" id="riNoteSave">Save notes</button></div>' +
+			'</div>';
+		document.body.appendChild(m);
+		m.addEventListener("click", function (e) { if (e.target === m) m.classList.remove("on"); });
+		document.getElementById("riNoteX").addEventListener("click", function () { m.classList.remove("on"); });
+		document.getElementById("riNoteCancel").addEventListener("click", function () { m.classList.remove("on"); });
+		return m;
+	}
+	function findStudent(lrn) { var all = allStudents(); for (var i = 0; i < all.length; i++) if (all[i].lrn === lrn) return all[i]; return null; }
+	function openNote(lrn) {
+		var st = findStudent(lrn); if (!st) return;
+		var m = noteModal();
+		var r = recOf(lrn);
+		document.getElementById("riNoteName").textContent = st.name + " \u00b7 " + st.level + " " + st.section;
+		var ta = document.getElementById("riNoteText"); ta.value = r.notes || "";
+		document.getElementById("riNoteSave").onclick = function () {
+			setRec(lrn, { notes: ta.value });
+			m.classList.remove("on");
+			if (ui && ui.toast) ui.toast("Interview notes saved on this device.", "ok");
+			drawRows();
+		};
+		m.classList.add("on");
+		setTimeout(function () { ta.focus(); }, 40);
+	}
+
+	function printList() {
+		var area = document.getElementById("clPrintArea");
+		if (!area) { area = document.createElement("div"); area.id = "clPrintArea"; document.body.appendChild(area); }
+		var scope = sortStudents(scopeStudents());
+		var label = state.desig === "all" ? "All Designates" : (desigOf(state.desig) ? desigOf(state.desig).name : "");
+		var c = statusCounts(scope);
+		var byLvl = {}, order = [];
+		scope.forEach(function (s) { if (!byLvl[s.level]) { byLvl[s.level] = []; order.push(s.level); } byLvl[s.level].push(s); });
+		var blocks = order.map(function (lvl) {
+			var n = 0;
+			var rows = byLvl[lvl].map(function (s) {
+				n++; var r = recOf(s.lrn);
+				return "<tr><td class=\"cpn\">" + n + "</td><td>" + esc(s.name) + "</td><td>" + esc(s.section) + "</td><td>" + esc(r.status) + "</td><td>" + esc(r.date || "") + "</td><td>" + esc(r.notes || "") + "</td></tr>";
+			}).join("");
+			return '<div class="cpr-grp">' + esc(lvl) + '</div><table class="cpr-tbl"><thead><tr><th>#</th><th>Name</th><th>Section</th><th>Status</th><th>Interview Date</th><th>Notes</th></tr></thead><tbody>' + rows + "</tbody></table>";
+		}).join("");
+		area.innerHTML = '<div class="cpr">' +
+			'<div class="cpr-head"><div class="cpr-ht">STELLA MARIS COLLEGE</div><div class="cpr-hs">Cubao, Quezon City</div><div class="cpr-doc">ROUTINE INTERVIEW TRACKER</div><div class="cpr-hs">School Year 2026-2027</div></div>' +
+			'<div class="cpr-meta"><div><span class="cpr-k">Guidance Designate:</span> ' + esc(label) + '</div><div><span class="cpr-k">Levels:</span> ' + esc(desigLevels() || "All") + '</div>' +
+			'<div><span class="cpr-k">Interviewed:</span> ' + c.Done + " / " + c.total + " (" + pct(c) + '%)</div><div><span class="cpr-k">Pending:</span> ' + c.Pending + '</div></div>' +
+			blocks +
+			'<div class="cpr-foot">Generated by SMC Guidance Center &middot; Routine interview = a one-on-one conversation with each student about their life.</div>' +
+			'</div>';
+		document.body.classList.add("printing-cl");
+		var cleanup = function () { document.body.classList.remove("printing-cl"); window.removeEventListener("afterprint", cleanup); };
+		window.addEventListener("afterprint", cleanup);
+		setTimeout(function () { window.print(); }, 60);
+	}
+
+	return { render: render, setUser: setUser, load: render };
+})();
