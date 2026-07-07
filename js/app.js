@@ -274,10 +274,10 @@ SMC.app = (function () {
         var initial = (u.name || '?').charAt(0).toUpperCase();
         document.getElementById('sbAv').textContent = initial;
         document.getElementById('sbName').textContent = u.name;
-        document.getElementById('sbRole').textContent = u.role;
+        document.getElementById('sbRole').textContent = (u.role === 'counselor' ? 'Guidance Designate' : u.role);
         var pmAvEl = document.getElementById('pmAv'); if (pmAvEl) pmAvEl.textContent = initial;
         var pmNameEl = document.getElementById('pmName'); if (pmNameEl) pmNameEl.textContent = u.name;
-        var pmRoleEl = document.getElementById('pmRole'); if (pmRoleEl) pmRoleEl.textContent = u.role;
+        var pmRoleEl = document.getElementById('pmRole'); if (pmRoleEl) pmRoleEl.textContent = (u.role === 'counselor' ? 'Guidance Designate' : u.role);
         var staff = u.role === 'admin' || u.role === 'co-admin';
         document.getElementById('navCounselors').style.display = staff ? '' : 'none';
         var neg = document.getElementById('navEvalGroup'); if (neg) neg.style.display = '';
@@ -537,7 +537,7 @@ SMC.app = (function () {
         inp.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
         document.addEventListener('click', function (e) { if (e.target !== inp && !box.contains(e.target)) close(); });
     }
-    var wnOpen = null, wnIntroOpen = null;
+    var wnOpen = null, wnIntroOpen = null, tourSeenKey = 'smc-tour-seen';
     function setupWhatsNew() {
         var ov = document.getElementById('tour');
         if (!ov) return;
@@ -597,30 +597,21 @@ SMC.app = (function () {
             if (v) showView(v);
             setTimeout(place, v ? 130 : 0);
         }
-        function markSeen() { try { localStorage.setItem('smc-whatsnew-2026-08c', '1'); } catch (e) { } }
+        function markSeen() { try { localStorage.setItem(tourSeenKey, '1'); } catch (e) { } }
         function close() { ov.classList.remove('on'); ov.setAttribute('aria-hidden', 'true'); clearOpen(); markSeen(); window.removeEventListener('resize', place); }
         back.addEventListener('click', function () { if (i > 0) { i--; render(); } });
         next.addEventListener('click', function () { if (i < steps.length - 1) { i++; render(); } else close(); });
         if (xB) xB.addEventListener('click', close);
         wnOpen = function () { i = 0; ov.classList.add('on'); ov.setAttribute('aria-hidden', 'false'); render(); window.addEventListener('resize', place); };
-        var intro = document.getElementById('wnIntro');
-        if (intro) {
-            var startB = document.getElementById('wnIntroStart');
-            var skipB = document.getElementById('wnIntroSkip');
-            var introX = document.getElementById('wnIntroX');
-            var introClose = function (seen) { intro.classList.remove('on'); intro.setAttribute('aria-hidden', 'true'); if (seen) markSeen(); };
-            if (startB) startB.addEventListener('click', function () { introClose(false); wnOpen(); });
-            if (skipB) skipB.addEventListener('click', function () { introClose(true); });
-            if (introX) introX.addEventListener('click', function () { introClose(true); });
-            wnIntroOpen = function () { intro.classList.add('on'); intro.setAttribute('aria-hidden', 'false'); };
-        }
-        var reopen = document.getElementById('wnReopen');
-        if (reopen) reopen.addEventListener('click', function () { if (wnIntroOpen) wnIntroOpen(); else if (wnOpen) wnOpen(); });
+        // "What's New" intro modal and its reopen button were removed. New users
+        // now get the feature tour automatically on first login (see maybeShowWhatsNew).
     }
     function maybeShowWhatsNew() {
-        try { if (localStorage.getItem('smc-whatsnew-2026-08c')) return; } catch (e) { }
-        if (wnIntroOpen) setTimeout(wnIntroOpen, 700);
-        else if (wnOpen) setTimeout(wnOpen, 700);
+        var key = 'smc-tour-seen';
+        try { if (user && user.username) key += '-' + String(user.username).toLowerCase(); } catch (e) { }
+        tourSeenKey = key;
+        try { if (localStorage.getItem(key)) return; } catch (e) { }
+        if (wnOpen) setTimeout(wnOpen, 800);
     }
     return { init: init, boot: boot, reset: reset, showScreen: showScreen, refreshEvalStats: refreshEvalStats, showTutorial: showTutorial, go: function (v) { showView(v); }, showLock: showLock, hideLock: hideLock, checkLock: checkLock, showSiteMaint: showSiteMaint, hideSiteMaint: hideSiteMaint, checkSiteMaint: checkSiteMaint };
 })();

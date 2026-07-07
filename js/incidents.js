@@ -9,6 +9,7 @@ SMC.incidents = (function () {
     var ROLES = ['Involved', 'Complainant', 'Respondent', 'Witness', 'Victim', 'Other'];
     function setUser(u) { user = u; }
     function esc(s) { return ui.esc(s); }
+    function roleLabel(r) { var s = String(r == null ? '' : r); return /^counselor$/i.test(s) ? 'Guidance Designate' : s; }
     function isStaff() { return !!(user && (user.role === 'admin' || user.role === 'co-admin')); }
     function host() { return document.getElementById('incidentsView'); }
     function fmtWhen(s) {
@@ -186,7 +187,8 @@ SMC.incidents = (function () {
             '<label class="inc-f"><span>Date &amp; time occurred</span><input type="datetime-local" id="incDate" value="' + esc(inc ? toLocalInput(inc.dateOccurred) : '') + '"></label>' +
             '<label class="inc-f full"><span>Location</span><input id="incLocation" value="' + esc(inc ? inc.location : '') + '" placeholder="Where it happened"></label>' +
             '</div>' +
-            '<div class="inc-inv-head"><span>Individuals involved</span><button type="button" class="tbtn bp" id="incAddInv">+ Add person</button></div>' +
+            '<div class="inc-inv-head"><span>Individuals involved</span><div class="inc-inv-actions"><button type="button" class="tbtn" id="incStuToggle">From class list</button><button type="button" class="tbtn bp" id="incAddInv">+ Add person</button></div></div>' +
+            '<div id="incStuSearch" class="inc-stu-search" hidden><input type="text" id="incStuQuery" class="inc-in" placeholder="Search a student by name or number" autocomplete="off"><div id="incStuResults" class="inc-stu-results"></div></div>' +
             '<div class="inc-inv-labels"><span>Name</span><span>Grade / Year</span><span>Section</span><span>Role</span><span></span></div>' +
             '<div id="incInvolved">' + arr.map(involvedRowHtml).join('') + '</div>' +
             '<label class="inc-f full"><span>Description of incident</span><textarea id="incDesc" rows="4" placeholder="What happened\u2026">' + esc(inc ? inc.description : '') + '</textarea></label>' +
@@ -196,8 +198,23 @@ SMC.incidents = (function () {
             '<div class="inc-modal-f"><button class="tbtn" id="incCancel">Cancel</button><button class="tbtn bp" id="incSave">Save Report</button></div></div>';
         document.getElementById('incClose').addEventListener('click', function () { closeOverlay('incFormOv'); });
         document.getElementById('incCancel').addEventListener('click', function () { closeOverlay('incFormOv'); });
-        document.getElementById('incAddInv').addEventListener('click', function () { var d = document.createElement('div'); d.innerHTML = involvedRowHtml({}); document.getElementById('incInvolved').appendChild(d.firstChild); });
+        function appendInvolved(p) { var d = document.createElement('div'); d.innerHTML = involvedRowHtml(p || {}); document.getElementById('incInvolved').appendChild(d.firstChild); }
+        document.getElementById('incAddInv').addEventListener('click', function () { appendInvolved({}); });
         document.getElementById('incInvolved').addEventListener('click', function (e) { var x = e.target.closest('.inc-inv-del'); if (x) x.closest('.inc-inv-row').remove(); });
+        var stuToggle = document.getElementById('incStuToggle'), stuBox = document.getElementById('incStuSearch'), stuQuery = document.getElementById('incStuQuery'), stuResults = document.getElementById('incStuResults');
+        function renderStuResults() {
+            if (!stuResults) return;
+            var cl = SMC.classlists;
+            if (!cl || !cl.searchStudents) { stuResults.innerHTML = '<div class="inc-stu-none">Class list is unavailable.</div>'; return; }
+            var q = (stuQuery.value || '').trim();
+            if (!q) { stuResults.innerHTML = ''; return; }
+            var res = cl.searchStudents(q).slice(0, 8);
+            if (!res.length) { stuResults.innerHTML = '<div class="inc-stu-none">No students match.</div>'; return; }
+            stuResults.innerHTML = res.map(function (s) { return '<button type="button" class="inc-stu-item" data-name="' + esc(s.name) + '" data-grade="' + esc(s.level) + '" data-section="' + esc(s.section) + '"><span class="inc-stu-nm">' + esc(s.name) + '</span><span class="inc-stu-meta">' + esc(s.level) + ' &middot; ' + esc(s.section) + ' &middot; ' + esc(s.lrn) + '</span></button>'; }).join('');
+        }
+        if (stuToggle) stuToggle.addEventListener('click', function () { if (!stuBox) return; stuBox.hidden = !stuBox.hidden; if (!stuBox.hidden && stuQuery) stuQuery.focus(); });
+        if (stuQuery) stuQuery.addEventListener('input', renderStuResults);
+        if (stuResults) stuResults.addEventListener('click', function (e) { var b = e.target.closest('.inc-stu-item'); if (!b) return; appendInvolved({ name: b.getAttribute('data-name'), grade: b.getAttribute('data-grade'), section: b.getAttribute('data-section') }); if (stuQuery) stuQuery.value = ''; stuResults.innerHTML = ''; ui.toast('Added ' + b.getAttribute('data-name') + ' to the report.', 'ok'); });
         document.getElementById('incSave').addEventListener('click', function () {
             var data = collectForm();
             if (!data.title) { ui.showErr(document.getElementById('incFormErr'), 'Please enter a title.'); return; }
@@ -219,7 +236,7 @@ SMC.incidents = (function () {
             '<div class="inc-view-meta">' + sevPill(inc.severity) + statPill(inc.status) + '<span class="inc-tag">' + esc(inc.type || '\u2014') + '</span></div>' +
             '<dl class="inc-dl"><dt>Date &amp; time</dt><dd>' + esc(fmtWhen(inc.dateOccurred)) + '</dd>' +
             '<dt>Location</dt><dd>' + esc(inc.location || '\u2014') + '</dd>' +
-            '<dt>Reported by</dt><dd>' + esc(inc.reportedBy || '\u2014') + ' <small>(' + esc(inc.reporterRole || '') + ')</small></dd>' +
+            '<dt>Reported by</dt><dd>' + esc(inc.reportedBy || '\u2014') + ' <small>(' + esc(roleLabel(inc.reporterRole)) + ')</small></dd>' +
             '<dt>Recorded</dt><dd>' + esc(inc.createdAt || '\u2014') + '</dd></dl>' +
             '<h4>Individuals involved</h4>' + invHtml +
             '<h4>Description</h4><div class="inc-view-txt">' + esc(inc.description || '\u2014').replace(/\n/g, '<br>') + '</div>' +
@@ -239,16 +256,15 @@ SMC.incidents = (function () {
         if (!area) { area = document.createElement('div'); area.id = 'incPrintArea'; document.body.appendChild(area); }
         area.innerHTML = '<div class="ipr">' +
             '<div class="ipr-head"><img src="assets/logo.jpg" onerror="this.style.display=&#39;none&#39;"><div class="ipr-ht"><h1>STELLA MARIS COLLEGE</h1><h2>Guidance Office</h2><div class="ipr-doc">OFFICIAL INCIDENT REPORT</div></div></div>' +
-            '<div class="ipr-conf">CONFIDENTIAL &mdash; For authorized personnel only</div><table class="ipr-meta"><tr><td class="k">Report ID</td><td>' + esc(inc.id) + '</td><td class="k">Status</td><td>' + esc(inc.status || 'Open') + '</td></tr>' +
-            '<tr><td class="k">Title</td><td>' + esc(inc.title || '') + '</td><td class="k">Type</td><td>' + esc(inc.type || '') + '</td></tr>' +
-            '<tr><td class="k">Severity</td><td>' + esc(inc.severity || '') + '</td><td class="k">Date &amp; Time</td><td>' + esc(fmtWhen(inc.dateOccurred)) + '</td></tr>' +
-            '<tr><td class="k">Location</td><td colspan="3">' + esc(inc.location || '') + '</td></tr></table>' +
+            '<div class="ipr-conf">CONFIDENTIAL &mdash; For authorized personnel only</div><table class="ipr-meta"><tr><td class="k">Title</td><td>' + esc(inc.title || '') + '</td><td class="k">Status</td><td>' + esc(inc.status || 'Open') + '</td></tr>' +
+            '<tr><td class="k">Type</td><td>' + esc(inc.type || '') + '</td><td class="k">Severity</td><td>' + esc(inc.severity || '') + '</td></tr>' +
+            '<tr><td class="k">Date &amp; Time</td><td>' + esc(fmtWhen(inc.dateOccurred)) + '</td><td class="k">Location</td><td>' + esc(inc.location || '') + '</td></tr></table>' +
             '<h3>Individuals Involved</h3>' +
             '<table class="ipr-inv"><thead><tr><th>#</th><th>Name</th><th>Grade / Year</th><th>Section</th><th>Role</th></tr></thead><tbody>' + invRows + '</tbody></table>' +
             '<h3>Description of Incident</h3><div class="ipr-txt">' + esc(inc.description || '').replace(/\n/g, '<br>') + '</div>' +
             '<h3>Actions Taken</h3><div class="ipr-txt">' + esc(inc.actionsTaken || '').replace(/\n/g, '<br>') + '</div>' +
             '<div class="ipr-foot">' +
-            '<div class="ipr-sign"><div class="ipr-line"></div><span>Reported by</span><strong>' + esc(inc.reportedBy || '') + '</strong><small>' + esc(inc.reporterRole || '') + '</small></div>' +
+            '<div class="ipr-sign"><div class="ipr-line"></div><span>Reported by</span><strong>' + esc(inc.reportedBy || '') + '</strong><small>' + esc(roleLabel(inc.reporterRole)) + '</small></div>' +
             '<div class="ipr-sign"><div class="ipr-line"></div><span>Received / Reviewed by</span><strong>&nbsp;</strong><small>Guidance Office</small></div>' +
             '</div>' +
             '<div class="ipr-note">This is an official record of the Stella Maris College Guidance Office. Printed on ' + esc(new Date().toLocaleString('en-PH')) + '. Handle in accordance with data privacy policies.</div>' +

@@ -1647,3 +1647,14 @@ html.share-mode,html.share-mode body{background:#eef2f9;height:100%;margin:0}
 .sc-row input{flex:1;padding:10px 12px;border:1px solid var(--line,#dde4f0);border-radius:9px;font-size:13px;background:var(--smoke,#f7f9fd);color:var(--ink,#0d1b2a)}
 .sc-exp{font-size:12px;color:var(--mist,#8596b2);margin:12px 0 0}
 .sc-err{color:#c94040;font-size:13px;padding:8px 0}
+
+/* Incident report — add person from class list */
+.inc-inv-actions{display:flex;gap:8px;align-items:center}
+.inc-stu-search{margin:6px 0 2px;position:relative}
+.inc-stu-search .inc-in{width:100%}
+.inc-stu-results{margin-top:6px;display:flex;flex-direction:column;gap:5px;max-height:230px;overflow:auto}
+.inc-stu-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:8px 11px;border:1px solid var(--line,#dde4f0);border-radius:9px;background:var(--paper,#fff);color:var(--ink,#0d1b2a);cursor:pointer;transition:all .15s}
+.inc-stu-item:hover{background:var(--smoke,#eef2f9);border-color:var(--navy,#002b6b)}
+.inc-stu-nm{font-weight:600;font-size:.9rem}
+.inc-stu-meta{font-size:.75rem;color:var(--mist,#8596b2)}
+.inc-stu-none{padding:8px 2px;font-size:.85rem;color:var(--mist,#8596b2)}
