@@ -141,19 +141,19 @@ SMC.incidents = (function () {
     function closeOverlay(id) { var ov = document.getElementById(id); if (ov) { ov.classList.remove('on'); ov.innerHTML = ''; } }
     function involvedRowHtml(p) {
         p = p || {};
-        return '<div class="inc-inv-row">' +
-            '<input class="inc-in inv-name" placeholder="Full name" value="' + esc(p.name || '') + '">' +
-            '<input class="inc-in inv-grade" placeholder="Grade / Year" value="' + esc(p.grade || '') + '">' +
-            '<input class="inc-in inv-section" placeholder="Section" value="' + esc(p.section || '') + '">' +
+        return '<div class="inc-inv-row" data-name="' + esc(p.name || '') + '" data-grade="' + esc(p.grade || '') + '" data-section="' + esc(p.section || '') + '">' +
+            '<span class="inv-name-txt">' + (p.name ? esc(p.name) : '&mdash;') + '</span>' +
+            '<span class="inv-grade-txt">' + (p.grade ? esc(p.grade) : '&mdash;') + '</span>' +
+            '<span class="inv-section-txt">' + (p.section ? esc(p.section) : '&mdash;') + '</span>' +
             '<select class="inc-in inv-role">' + ROLES.map(function (r) { return '<option' + (p.role === r ? ' selected' : '') + '>' + esc(r) + '</option>'; }).join('') + '</select>' +
             '<button type="button" class="inc-inv-del" title="Remove">&times;</button></div>';
     }
     function collectForm() {
         var involved = [];
         document.querySelectorAll('#incInvolved .inc-inv-row').forEach(function (row) {
-            var name = row.querySelector('.inv-name').value.trim();
-            var grade = row.querySelector('.inv-grade').value.trim();
-            var section = row.querySelector('.inv-section').value.trim();
+            var name = (row.getAttribute('data-name') || '').trim();
+            var grade = (row.getAttribute('data-grade') || '').trim();
+            var section = (row.getAttribute('data-section') || '').trim();
             var role = row.querySelector('.inv-role').value;
             if (name || grade || section) involved.push({ name: name, grade: grade, section: section, role: role });
         });
@@ -187,8 +187,8 @@ SMC.incidents = (function () {
             '<label class="inc-f"><span>Date &amp; time occurred</span><input type="datetime-local" id="incDate" value="' + esc(inc ? toLocalInput(inc.dateOccurred) : '') + '"></label>' +
             '<label class="inc-f full"><span>Location</span><input id="incLocation" value="' + esc(inc ? inc.location : '') + '" placeholder="Where it happened"></label>' +
             '</div>' +
-            '<div class="inc-inv-head"><span>Individuals involved</span><div class="inc-inv-actions"><button type="button" class="tbtn" id="incStuToggle">From class list</button><button type="button" class="tbtn bp" id="incAddInv">+ Add person</button></div></div>' +
-            '<div id="incStuSearch" class="inc-stu-search" hidden><input type="text" id="incStuQuery" class="inc-in" placeholder="Search a student by name or number" autocomplete="off"><div id="incStuResults" class="inc-stu-results"></div></div>' +
+            '<div class="inc-inv-head"><span>Individuals involved</span><span class="inc-inv-hint">Search the class list to add students</span></div>' +
+            '<div id="incStuSearch" class="inc-stu-search"><input type="text" id="incStuQuery" class="inc-in" placeholder="Search a student by name or number to add" autocomplete="off"><div id="incStuResults" class="inc-stu-results"></div></div>' +
             '<div class="inc-inv-labels"><span>Name</span><span>Grade / Year</span><span>Section</span><span>Role</span><span></span></div>' +
             '<div id="incInvolved">' + arr.map(involvedRowHtml).join('') + '</div>' +
             '<label class="inc-f full"><span>Description of incident</span><textarea id="incDesc" rows="4" placeholder="What happened\u2026">' + esc(inc ? inc.description : '') + '</textarea></label>' +
@@ -199,9 +199,8 @@ SMC.incidents = (function () {
         document.getElementById('incClose').addEventListener('click', function () { closeOverlay('incFormOv'); });
         document.getElementById('incCancel').addEventListener('click', function () { closeOverlay('incFormOv'); });
         function appendInvolved(p) { var d = document.createElement('div'); d.innerHTML = involvedRowHtml(p || {}); document.getElementById('incInvolved').appendChild(d.firstChild); }
-        document.getElementById('incAddInv').addEventListener('click', function () { appendInvolved({}); });
         document.getElementById('incInvolved').addEventListener('click', function (e) { var x = e.target.closest('.inc-inv-del'); if (x) x.closest('.inc-inv-row').remove(); });
-        var stuToggle = document.getElementById('incStuToggle'), stuBox = document.getElementById('incStuSearch'), stuQuery = document.getElementById('incStuQuery'), stuResults = document.getElementById('incStuResults');
+        var stuQuery = document.getElementById('incStuQuery'), stuResults = document.getElementById('incStuResults');
         function renderStuResults() {
             if (!stuResults) return;
             var cl = SMC.classlists;
@@ -212,9 +211,8 @@ SMC.incidents = (function () {
             if (!res.length) { stuResults.innerHTML = '<div class="inc-stu-none">No students match.</div>'; return; }
             stuResults.innerHTML = res.map(function (s) { return '<button type="button" class="inc-stu-item" data-name="' + esc(s.name) + '" data-grade="' + esc(s.level) + '" data-section="' + esc(s.section) + '"><span class="inc-stu-nm">' + esc(s.name) + '</span><span class="inc-stu-meta">' + esc(s.level) + ' &middot; ' + esc(s.section) + ' &middot; ' + esc(s.lrn) + '</span></button>'; }).join('');
         }
-        if (stuToggle) stuToggle.addEventListener('click', function () { if (!stuBox) return; stuBox.hidden = !stuBox.hidden; if (!stuBox.hidden && stuQuery) stuQuery.focus(); });
         if (stuQuery) stuQuery.addEventListener('input', renderStuResults);
-        if (stuResults) stuResults.addEventListener('click', function (e) { var b = e.target.closest('.inc-stu-item'); if (!b) return; appendInvolved({ name: b.getAttribute('data-name'), grade: b.getAttribute('data-grade'), section: b.getAttribute('data-section') }); if (stuQuery) stuQuery.value = ''; stuResults.innerHTML = ''; ui.toast('Added ' + b.getAttribute('data-name') + ' to the report.', 'ok'); });
+        if (stuResults) stuResults.addEventListener('click', function (e) { var b = e.target.closest('.inc-stu-item'); if (!b) return; var nm = b.getAttribute('data-name'); var dup = false; document.querySelectorAll('#incInvolved .inc-inv-row').forEach(function (r) { if ((r.getAttribute('data-name') || '') === nm) dup = true; }); if (dup) { ui.toast(nm + ' is already added.'); } else { appendInvolved({ name: nm, grade: b.getAttribute('data-grade'), section: b.getAttribute('data-section') }); ui.toast('Added ' + nm + ' to the report.', 'ok'); } if (stuQuery) stuQuery.value = ''; stuResults.innerHTML = ''; });
         document.getElementById('incSave').addEventListener('click', function () {
             var data = collectForm();
             if (!data.title) { ui.showErr(document.getElementById('incFormErr'), 'Please enter a title.'); return; }

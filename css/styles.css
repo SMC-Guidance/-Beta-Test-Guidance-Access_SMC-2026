@@ -1658,3 +1658,6 @@ html.share-mode,html.share-mode body{background:#eef2f9;height:100%;margin:0}
 .inc-stu-nm{font-weight:600;font-size:.9rem}
 .inc-stu-meta{font-size:.75rem;color:var(--mist,#8596b2)}
 .inc-stu-none{padding:8px 2px;font-size:.85rem;color:var(--mist,#8596b2)}
+.inc-inv-hint{font-weight:400 !important;font-size:.75rem;color:var(--mist,#8596b2) !important}
+.inc-inv-row .inv-name-txt,.inc-inv-row .inv-grade-txt,.inc-inv-row .inv-section-txt{padding:8px 10px;font-size:.86rem;color:var(--ink,#0d1b2a);background:var(--smoke,#eef2f9);border:1px solid var(--line,#dde4f0);border-radius:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inc-inv-row .inv-name-txt{font-weight:600}
