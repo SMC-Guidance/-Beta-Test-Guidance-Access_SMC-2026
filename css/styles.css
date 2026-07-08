@@ -1726,3 +1726,13 @@ html.share-mode,html.share-mode body{background:#eef2f9;height:100%;margin:0}
 [data-theme="dark"] .ri-tbl th{background:#1b2438;color:#aeb9cd}
 [data-theme="dark"] .ri-tbl td{color:#e6eefb;border-color:#2a3547}
 [data-theme="dark"] .ri-head-ic{background:#1b2438}
+.ri-drop-toggle{display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:var(--mist,#8596b2);cursor:pointer;padding:0 4px;white-space:nowrap}
+.ri-drop-btn{padding:5px 9px;border-radius:7px;border:1px solid var(--line,#dde4f0);background:transparent;color:#b5342b;font-size:.78rem;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap}
+.ri-drop-btn:hover{background:rgba(181,52,43,.1);border-color:#b5342b}
+.ri-restore{padding:5px 9px;border-radius:7px;border:1px solid var(--navy,#002b6b);background:transparent;color:var(--navy,#002b6b);font-size:.78rem;font-weight:600;font-family:inherit;cursor:pointer}
+.ri-restore:hover{background:rgba(0,43,107,.08)}
+.ri-dropped{opacity:.72}
+.ri-dropped .ri-nm{text-decoration:line-through}
+.ri-drop-tag{display:inline-block;padding:3px 9px;border-radius:20px;background:rgba(181,52,43,.12);color:#b5342b;font-size:.74rem;font-weight:600}
+.ri-stat.dropped strong{color:#b5342b}
+[data-theme="dark"] .ri-drop-btn,[data-theme="dark"] .ri-restore{background:transparent}

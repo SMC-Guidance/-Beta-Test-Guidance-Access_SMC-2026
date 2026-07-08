@@ -61,6 +61,8 @@ function doPost(e) {
             case 'setSecurity': return ok(handleSetSecurity(requireAdmin(session), payload));
             case 'getClassColors': return ok(handleGetClassColors(session));
             case 'setClassColor': return ok(handleSetClassColor(requireAuth(session), payload));
+            case 'listRoutine': return ok(handleListRoutine(requireAuth(session)));
+            case 'saveRoutine': return ok(handleSaveRoutine(requireAuth(session), payload));
             case 'chatPoll': return ok(handleChatPoll(requireAuth(session)));
             case 'getThread': return ok(handleGetThread(requireAuth(session), payload));
             case 'sendMessage': return ok(handleSendMessage(requireAuth(session), payload));
@@ -308,6 +310,52 @@ function handleSetClassColor(session, p) {
     if (color)
         sh.appendRow([key, color, session.username || '', now]);
     return { key: key, color: color };
+}
+var ROUTINE_HEADERS = ['lrn', 'status', 'date', 'notes', 'dropout', 'updatedBy', 'updatedAt'];
+function routineSheet() { return sheetOrCreate('RoutineInterviews', ROUTINE_HEADERS); }
+function riDateStr(v) {
+    if (v instanceof Date)
+        return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    var s = String(v == null ? '' : v).trim();
+    if (s.charAt(0) === "'") s = s.slice(1);
+    return s;
+}
+function handleListRoutine(session) {
+    var sh = routineSheet();
+    var values = sh.getDataRange().getValues();
+    var map = {};
+    for (var r = 1; r < values.length; r++) {
+        var lrn = String(values[r][0] || '').trim();
+        if (!lrn) continue;
+        map[lrn] = {
+            status: String(values[r][1] || 'Pending').trim() || 'Pending',
+            date: riDateStr(values[r][2]),
+            notes: String(values[r][3] == null ? '' : values[r][3]),
+            dropout: values[r][4] === true || String(values[r][4]).toLowerCase() === 'true' || String(values[r][4]).toLowerCase() === 'yes'
+        };
+    }
+    return { records: map };
+}
+function handleSaveRoutine(session, p) {
+    var lrn = String(p && p.lrn || '').trim().slice(0, 40);
+    if (!lrn)
+        throw httpError('A student is required.', 'BAD_REQUEST');
+    var status = String(p && p.status || 'Pending').trim();
+    if (['Pending', 'Scheduled', 'Done'].indexOf(status) === -1) status = 'Pending';
+    var date = String(p && p.date || '').trim().slice(0, 20);
+    var notes = String((p && p.notes) == null ? '' : p.notes).slice(0, 2000);
+    var dropout = (p && p.dropout) === true;
+    var sh = routineSheet();
+    var values = sh.getDataRange().getValues();
+    var now = new Date().toISOString();
+    for (var r = 1; r < values.length; r++) {
+        if (String(values[r][0] || '').trim() === lrn) {
+            sh.getRange(r + 1, 2, 1, 6).setValues([[status, date, notes, dropout, session.username || '', now]]);
+            return { lrn: lrn, status: status, date: date, notes: notes, dropout: dropout };
+        }
+    }
+    sh.appendRow([lrn, status, date, notes, dropout, session.username || '', now]);
+    return { lrn: lrn, status: status, date: date, notes: notes, dropout: dropout };
 }
 var PRESENCE_HEADERS = ['username', 'lastSeen'];
 var MESSAGE_HEADERS = ['id', 'from', 'to', 'text', 'ts', 'readAt', 'kind'];

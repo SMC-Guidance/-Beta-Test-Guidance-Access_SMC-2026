@@ -115,6 +115,8 @@ SMC.api = (function () {
         saveClassFlag: function (data) { return call('saveClassFlag', data); },
         getClassColors: function () { return call('getClassColors', {}); },
         setClassColor: function (data) { return call('setClassColor', data); },
+        listRoutine: function () { return call('listRoutine', {}); },
+        saveRoutine: function (data) { return call('saveRoutine', data); },
         securityStatus: function () { return call('securityStatus', {}); },
         unlockSite: function (code) { return call('unlockSite', { code: code }); },
         getSecurity: function () { return call('getSecurity', {}); },

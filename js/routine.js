@@ -12,14 +12,35 @@ SMC.routine = (function () {
 		{ id: "gundran", name: "Ms. Gundran", levels: ["Grade 11", "Grade 5", "Grade 2", "Grade 1"] },
 		{ id: "reyes", name: "Mr. Reyes", levels: ["Grade 10", "Grade 4", "Grade 3"] }
 	];
-	var state = { desig: "all", level: "", section: "", status: "", q: "" };
+	var state = { desig: "all", level: "", section: "", status: "", q: "", showDropped: false };
 	var records = load();
 
 	function esc(s) { return (ui && ui.esc) ? ui.esc(s) : String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
 	function load() { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}") || {}; } catch (e) { return {}; } }
 	function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(records)); } catch (e) { } }
-	function recOf(lrn) { var r = records[lrn] || {}; return { status: r.status || "Pending", date: r.date || "", notes: r.notes || "" }; }
-	function setRec(lrn, patch) { var r = recOf(lrn); if (patch.status != null) r.status = patch.status; if (patch.date != null) r.date = patch.date; if (patch.notes != null) r.notes = patch.notes; records[lrn] = r; save(); }
+	function recOf(lrn) { var r = records[lrn] || {}; return { status: r.status || "Pending", date: r.date || "", notes: r.notes || "", dropout: r.dropout === true }; }
+	function setRec(lrn, patch) { var r = recOf(lrn); if (patch.status != null) r.status = patch.status; if (patch.date != null) r.date = patch.date; if (patch.notes != null) r.notes = patch.notes; if (patch.dropout != null) r.dropout = !!patch.dropout; records[lrn] = r; save(); }
+	function persist(lrn) {
+		save();
+		if (!(SMC.api && SMC.api.saveRoutine)) { if (ui && ui.toast) ui.toast("Saved on this device.", "ok"); return; }
+		var r = recOf(lrn);
+		SMC.api.saveRoutine({ lrn: lrn, status: r.status, date: r.date, notes: r.notes, dropout: r.dropout })
+			.then(function () { if (ui && ui.toast) ui.toast("Saved online.", "ok"); })
+			.catch(function () { if (ui && ui.toast) ui.toast("Saved on this device \u2014 reconnect to sync online.", "warn"); });
+	}
+	function fetchRemote() {
+		if (!(SMC.api && SMC.api.listRoutine)) return;
+		SMC.api.listRoutine().then(function (d) {
+			if (d && d.records) { records = d.records; save(); refresh(); }
+		}).catch(function () { });
+	}
+	function markDropout(lrn, drop) {
+		var st = findStudent(lrn);
+		if (drop && st && typeof window.confirm === "function" && !window.confirm(st.name + " will be marked as a dropout and excluded from the counts. You can restore them later. Continue?")) return;
+		setRec(lrn, { dropout: !!drop });
+		persist(lrn);
+		refresh();
+	}
 
 	function setUser(u) { user = u; }
 	function levelIdx(l) { var i = LEVEL_ORDER.indexOf(l); return i < 0 ? 999 : i; }
@@ -41,6 +62,8 @@ SMC.routine = (function () {
 		var d = state.desig === "all" ? null : desigOf(state.desig);
 		return allStudents().filter(function (s) { return d ? d.levels.indexOf(s.level) !== -1 : true; });
 	}
+	function activeIn(list) { return list.filter(function (s) { return !recOf(s.lrn).dropout; }); }
+	function droppedIn(list) { return list.filter(function (s) { return recOf(s.lrn).dropout; }); }
 	function sortStudents(list) {
 		return list.slice().sort(function (a, b) {
 			var d = levelIdx(a.level) - levelIdx(b.level);
@@ -82,19 +105,21 @@ SMC.routine = (function () {
 			'<select id="riLevel" class="ri-filter"></select>' +
 			'<select id="riSection" class="ri-filter"></select>' +
 			'<select id="riStatusF" class="ri-filter"><option value="">All statuses</option>' + STATUSES.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('') + '</select>' +
+			'<label class="ri-drop-toggle"><input type="checkbox" id="riShowDropped"> Show dropouts</label>' +
 			'</div>' +
 			'<div class="ri-tbl-wrap"><table class="ri-tbl"><thead id="riHead"></thead><tbody id="riTbody"></tbody></table></div>' +
 			'</div>';
 		buildFilters();
 		bind();
 		refresh();
+		fetchRemote();
 	}
 
 	function buildTabs() {
 		var tabs = document.getElementById("riTabs");
 		if (!tabs) return;
 		function chip(id, name, list) {
-			var c = statusCounts(list);
+			var c = statusCounts(activeIn(list));
 			return '<button type="button" class="ri-tab' + (state.desig === id ? ' on' : '') + '" data-d="' + id + '">' +
 				'<span class="ri-tab-nm">' + esc(name) + '</span>' +
 				'<span class="ri-tab-mt">' + c.Done + '/' + c.total + ' done</span>' +
@@ -131,7 +156,9 @@ SMC.routine = (function () {
 	function updateSummary() {
 		var box = document.getElementById("riSummary");
 		if (!box) return;
-		var c = statusCounts(scopeStudents());
+		var scope = scopeStudents();
+		var c = statusCounts(activeIn(scope));
+		var dropped = droppedIn(scope).length;
 		var p = pct(c);
 		var label = state.desig === "all" ? "All designates" : (desigOf(state.desig) ? desigOf(state.desig).name : "");
 		box.innerHTML =
@@ -143,6 +170,7 @@ SMC.routine = (function () {
 			'<span class="ri-stat done"><strong>' + c.Done + '</strong> done</span>' +
 			'<span class="ri-stat sched"><strong>' + c.Scheduled + '</strong> scheduled</span>' +
 			'<span class="ri-stat pending"><strong>' + c.Pending + '</strong> pending</span>' +
+			(dropped ? '<span class="ri-stat dropped"><strong>' + dropped + '</strong> dropped (not counted)</span>' : '') +
 			'</div>';
 	}
 
@@ -150,7 +178,11 @@ SMC.routine = (function () {
 		var head = document.getElementById("riHead");
 		if (!head) return;
 		var showD = state.desig === "all";
-		head.innerHTML = '<tr><th>#</th><th>Student</th>' + (showD ? '<th>Designate</th>' : '') + '<th>Grade &amp; Section</th><th>Sex</th><th>Status</th><th>Interview date</th><th>Notes</th></tr>';
+		if (state.showDropped) {
+			head.innerHTML = '<tr><th>#</th><th>Student</th>' + (showD ? '<th>Designate</th>' : '') + '<th>Grade &amp; Section</th><th>Sex</th><th>Status</th><th></th></tr>';
+			return;
+		}
+		head.innerHTML = '<tr><th>#</th><th>Student</th>' + (showD ? '<th>Designate</th>' : '') + '<th>Grade &amp; Section</th><th>Sex</th><th>Status</th><th>Interview date</th><th>Notes</th><th></th></tr>';
 	}
 
 	function drawRows() {
@@ -158,14 +190,35 @@ SMC.routine = (function () {
 		if (!tb) return;
 		var showD = state.desig === "all";
 		var q = (state.q || "").toLowerCase().trim();
-		var list = sortStudents(scopeStudents().filter(function (s) {
+		var base = scopeStudents().filter(function (s) {
 			if (state.level && s.level !== state.level) return false;
 			if (state.section && s.section !== state.section) return false;
-			if (state.status && recOf(s.lrn).status !== state.status) return false;
 			if (q && (s.name + " " + s.lrn).toLowerCase().indexOf(q) === -1) return false;
 			return true;
+		});
+		if (state.showDropped) {
+			var dl = sortStudents(droppedIn(base));
+			var dcol = showD ? 7 : 6;
+			if (!dl.length) { tb.innerHTML = '<tr><td colspan="' + dcol + '" class="ri-empty">No dropped students.</td></tr>'; return; }
+			tb.innerHTML = dl.map(function (s, idx) {
+				var d = levelDesig(s.level);
+				return '<tr class="ri-dropped" data-lrn="' + esc(s.lrn) + '">' +
+					'<td class="ri-num">' + (idx + 1) + '</td>' +
+					'<td class="ri-nm">' + esc(s.name) + '<span class="ri-lrn">' + esc(s.lrn) + '</span></td>' +
+					(showD ? '<td class="ri-desig">' + esc(d ? d.name : "\u2014") + '</td>' : '') +
+					'<td>' + esc(s.level) + ' \u00b7 ' + esc(s.section) + '</td>' +
+					'<td>' + esc(s.sex) + '</td>' +
+					'<td><span class="ri-drop-tag">Dropped</span></td>' +
+					'<td><button type="button" class="ri-restore" data-lrn="' + esc(s.lrn) + '">Restore</button></td>' +
+					'</tr>';
+			}).join('');
+			return;
+		}
+		var list = sortStudents(activeIn(base).filter(function (s) {
+			if (state.status && recOf(s.lrn).status !== state.status) return false;
+			return true;
 		}));
-		var colspan = showD ? 8 : 7;
+		var colspan = showD ? 9 : 8;
 		if (!list.length) { tb.innerHTML = '<tr><td colspan="' + colspan + '" class="ri-empty">No students match your filters.</td></tr>'; return; }
 		tb.innerHTML = list.map(function (s, idx) {
 			var r = recOf(s.lrn);
@@ -181,6 +234,7 @@ SMC.routine = (function () {
 				'<td><select class="ri-status ri-st-' + stCls(r.status) + '" data-lrn="' + esc(s.lrn) + '">' + opts + '</select></td>' +
 				'<td><input type="date" class="ri-date" data-lrn="' + esc(s.lrn) + '" value="' + esc(r.date) + '"></td>' +
 				'<td><button type="button" class="ri-note-btn" data-lrn="' + esc(s.lrn) + '">' + note + '</button></td>' +
+				'<td><button type="button" class="ri-drop-btn" data-lrn="' + esc(s.lrn) + '" title="Mark as dropout (excluded from counts)">Dropout</button></td>' +
 				'</tr>';
 		}).join('');
 	}
@@ -198,17 +252,22 @@ SMC.routine = (function () {
 		var lv = document.getElementById("riLevel"); if (lv) lv.addEventListener("change", function () { state.level = this.value; buildFilters(); drawRows(); });
 		var sec = document.getElementById("riSection"); if (sec) sec.addEventListener("change", function () { state.section = this.value; drawRows(); });
 		var stf = document.getElementById("riStatusF"); if (stf) stf.addEventListener("change", function () { state.status = this.value; drawRows(); });
+		var sd = document.getElementById("riShowDropped"); if (sd) sd.addEventListener("change", function () { state.showDropped = this.checked; buildHead(); drawRows(); });
 		var tb = document.getElementById("riTbody");
 		if (tb) {
 			tb.addEventListener("change", function (e) {
 				var sel = e.target.closest("select.ri-status");
-				if (sel) { setRec(sel.getAttribute("data-lrn"), { status: sel.value }); sel.className = "ri-status ri-st-" + stCls(sel.value); updateSummary(); buildTabs(); if (state.status) drawRows(); return; }
+				if (sel) { var slrn = sel.getAttribute("data-lrn"); setRec(slrn, { status: sel.value }); persist(slrn); sel.className = "ri-status ri-st-" + stCls(sel.value); updateSummary(); buildTabs(); if (state.status) drawRows(); return; }
 				var dt = e.target.closest("input.ri-date");
-				if (dt) { setRec(dt.getAttribute("data-lrn"), { date: dt.value }); return; }
+				if (dt) { var dlrn = dt.getAttribute("data-lrn"); setRec(dlrn, { date: dt.value }); persist(dlrn); return; }
 			});
 			tb.addEventListener("click", function (e) {
 				var nb = e.target.closest(".ri-note-btn");
-				if (nb) openNote(nb.getAttribute("data-lrn"));
+				if (nb) { openNote(nb.getAttribute("data-lrn")); return; }
+				var db = e.target.closest(".ri-drop-btn");
+				if (db) { markDropout(db.getAttribute("data-lrn"), true); return; }
+				var rb = e.target.closest(".ri-restore");
+				if (rb) { markDropout(rb.getAttribute("data-lrn"), false); return; }
 			});
 		}
 		var pr = document.getElementById("riPrint"); if (pr) pr.addEventListener("click", printList);
@@ -240,8 +299,8 @@ SMC.routine = (function () {
 		var ta = document.getElementById("riNoteText"); ta.value = r.notes || "";
 		document.getElementById("riNoteSave").onclick = function () {
 			setRec(lrn, { notes: ta.value });
+			persist(lrn);
 			m.classList.remove("on");
-			if (ui && ui.toast) ui.toast("Interview notes saved on this device.", "ok");
 			drawRows();
 		};
 		m.classList.add("on");
@@ -251,7 +310,7 @@ SMC.routine = (function () {
 	function printList() {
 		var area = document.getElementById("clPrintArea");
 		if (!area) { area = document.createElement("div"); area.id = "clPrintArea"; document.body.appendChild(area); }
-		var scope = sortStudents(scopeStudents());
+		var scope = sortStudents(activeIn(scopeStudents()));
 		var label = state.desig === "all" ? "All Designates" : (desigOf(state.desig) ? desigOf(state.desig).name : "");
 		var c = statusCounts(scope);
 		var byLvl = {}, order = [];
