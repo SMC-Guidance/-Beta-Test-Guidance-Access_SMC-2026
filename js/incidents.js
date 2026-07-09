@@ -12,11 +12,34 @@ SMC.incidents = (function () {
     function roleLabel(r) { var s = String(r == null ? '' : r); return /^counselor$/i.test(s) ? 'Guidance Designate' : s; }
     function isStaff() { return !!(user && (user.role === 'admin' || user.role === 'co-admin')); }
     function host() { return document.getElementById('incidentsView'); }
+    function hasTimePart(s) { return /[T ]\d{1,2}:\d{2}/.test(String(s || '')); }
     function fmtWhen(s) {
         if (!s) return '\u2014';
-        var d = new Date(String(s).replace(' ', 'T'));
+        var str = String(s);
+        var dm = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (dm && !hasTimePart(str)) {
+            var d0 = new Date(+dm[1], +dm[2] - 1, +dm[3]);
+            return d0.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+        var d = new Date(str.replace(' ', 'T'));
         if (isNaN(d.getTime())) return s;
         return d.toLocaleString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+    function toDateInput(s) {
+        if (!s) return '';
+        var m = String(s).match(/^(\d{4}-\d{2}-\d{2})/);
+        if (m) return m[1];
+        var d = new Date(String(s).replace(' ', 'T'));
+        if (isNaN(d.getTime())) return '';
+        var p = function (n) { return (n < 10 ? '0' : '') + n; };
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    }
+    function toTimeInput(s) {
+        if (!s || !hasTimePart(s)) return '';
+        var m = String(s).match(/[T ](\d{1,2}):(\d{2})/);
+        if (!m) return '';
+        var p = function (n) { return (n < 10 ? '0' : '') + n; };
+        return p(+m[1]) + ':' + p(+m[2]);
     }
     function toLocalInput(s) {
         if (!s) return '';
@@ -163,7 +186,7 @@ SMC.incidents = (function () {
             type: document.getElementById('incType').value,
             severity: document.getElementById('incSeverity').value,
             status: document.getElementById('incStatus').value,
-            dateOccurred: document.getElementById('incDate').value,
+            dateOccurred: (function () { var dv = document.getElementById('incDate').value; var te = document.getElementById('incTime'); var tv = te ? te.value : ''; return dv ? (tv ? dv + 'T' + tv : dv) : (tv || ''); })(),
             location: document.getElementById('incLocation').value.trim(),
             description: document.getElementById('incDesc').value.trim(),
             actionsTaken: document.getElementById('incActions').value.trim(),
@@ -184,7 +207,8 @@ SMC.incidents = (function () {
             '<label class="inc-f"><span>Type</span><select id="incType">' + TYPES.map(function (t) { return '<option' + (inc && inc.type === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select></label>' +
             '<label class="inc-f"><span>Severity</span><select id="incSeverity">' + SEV.map(function (t) { return '<option' + ((inc ? inc.severity : 'Medium') === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select></label>' +
             '<label class="inc-f"><span>Status</span><select id="incStatus">' + STAT.map(function (t) { return '<option' + ((inc ? inc.status : 'Open') === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select></label>' +
-            '<label class="inc-f"><span>Date &amp; time occurred</span><input type="datetime-local" id="incDate" value="' + esc(inc ? toLocalInput(inc.dateOccurred) : '') + '"></label>' +
+            '<label class="inc-f"><span>Date occurred</span><input type="date" id="incDate" value="' + esc(inc ? toDateInput(inc.dateOccurred) : '') + '"></label>' +
+            '<label class="inc-f"><span>Time occurred <em class="inc-opt">(optional)</em></span><input type="time" id="incTime" value="' + esc(inc ? toTimeInput(inc.dateOccurred) : '') + '"></label>' +
             '<label class="inc-f full"><span>Location</span><input id="incLocation" value="' + esc(inc ? inc.location : '') + '" placeholder="Where it happened"></label>' +
             '</div>' +
             '<div class="inc-inv-head"><span>Individuals involved</span><span class="inc-inv-hint">Search the class list to add students</span></div>' +
