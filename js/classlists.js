@@ -79,15 +79,27 @@ SMC.classlists = (function () {
 		}
 		return { flag: st.flag || "", note: st.note || "" };
 	}
+	function flagOf(lrn) {
+		var d = data();
+		for (var i = 0; i < d.length; i++) {
+			for (var j = 0; j < d[i].students.length; j++) {
+				if (d[i].students[j].lrn === lrn) return effFlag(d[i].students[j]).flag || "";
+			}
+		}
+		return "";
+	}
+	function isDropped(st) { return !!(SMC.routine && SMC.routine.isDropout && SMC.routine.isDropout(st.lrn)); }
 
 	function host() { return document.getElementById("classListsView"); }
 	function tally(sec) {
-		var m = 0, f = 0, fl = 0;
+		var m = 0, f = 0, fl = 0, dr = 0, total = 0;
 		sec.students.forEach(function (st) {
+			if (isDropped(st)) { dr++; return; }
+			total++;
 			if (st.sex === "M") m++; else if (st.sex === "F") f++;
 			if (effFlag(st).flag) fl++;
 		});
-		return { m: m, f: f, fl: fl, total: sec.students.length };
+		return { m: m, f: f, fl: fl, dr: dr, total: total };
 	}
 	function flagCls(f) { return f === "Behavior" ? "beh" : f === "Academic" ? "acad" : "close"; }
 	function flagBadge(f) { if (!f) return ""; return '<span class="cl-fl cl-fl-' + flagCls(f) + '">' + esc(f) + "</span>"; }
@@ -118,16 +130,16 @@ SMC.classlists = (function () {
 		var body = document.getElementById("clBody");
 		if (!body) return;
 		var levels = LEVEL_ORDER.filter(function (l) { return data().some(function (s) { return s.level === l; }); });
-		var grand = data().reduce(function (a, s) { return a + s.students.length; }, 0);
-		var gFlag = 0; data().forEach(function (s) { s.students.forEach(function (st) { if (effFlag(st).flag) gFlag++; }); });
+		var grand = 0, gDrop = 0; data().forEach(function (s) { s.students.forEach(function (st) { if (isDropped(st)) { gDrop++; } else { grand++; } }); });
+		var gFlag = 0; data().forEach(function (s) { s.students.forEach(function (st) { if (!isDropped(st) && effFlag(st).flag) gFlag++; }); });
 		body.innerHTML =
 			'<div class="cl-tools">' +
 			'<div class="cl-search-wrap"><svg class="cl-search-ic" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>' +
 			'<input type="text" id="clSearch" class="cl-search" placeholder="Search student name, Student Number, section or adviser"></div>' +
 			'<select id="clLevel" class="cl-filter"><option value="">All year levels</option>' + levels.map(function (l) { return '<option value="' + esc(l) + '">' + esc(l) + "</option>"; }).join("") + "</select>" +
-			'<select id="clFlag" class="cl-filter"><option value="">All students</option><option value="__any__">Any flag</option>' + FLAGS.map(function (f) { return '<option value="' + esc(f) + '">' + esc(f) + "</option>"; }).join("") + "</select>" +
+			'<select id="clFlag" class="cl-filter"><option value="">All students</option><option value="__any__">Any concern</option>' + FLAGS.map(function (f) { return '<option value="' + esc(f) + '">' + esc(f) + "</option>"; }).join("") + "</select>" +
 			"</div>" +
-			'<div class="cl-summary"><span><strong>' + data().length + '</strong> sections</span><span><strong>' + grand + '</strong> students</span><span><strong>' + gFlag + '</strong> flagged</span></div>' +
+			'<div class="cl-summary"><span><strong>' + data().length + '</strong> sections</span><span><strong>' + grand + '</strong> students</span><span><strong>' + gFlag + '</strong> with concern</span>' + (gDrop ? '<span><strong>' + gDrop + '</strong> dropped</span>' : '') + '</div>' +
 			'<div id="clGrid" class="cl-list"></div>';
 		document.getElementById("clSearch").addEventListener("input", drawCards);
 		document.getElementById("clLevel").addEventListener("change", drawCards);
@@ -167,19 +179,19 @@ SMC.classlists = (function () {
 		var byLvl = {}, order = [];
 		list.forEach(function (s) { if (!byLvl[s.level]) { byLvl[s.level] = []; order.push(s.level); } byLvl[s.level].push(s); });
 		grid.innerHTML = order.map(function (lvl) {
-			var secs = byLvl[lvl], gc = gradeColor(lvl), gTot = 0, gFl = 0;
-			secs.forEach(function (s) { var tt = tally(s); gTot += tt.total; gFl += tt.fl; });
+			var secs = byLvl[lvl], gc = gradeColor(lvl), gTot = 0, gFl = 0, gDr = 0;
+			secs.forEach(function (s) { var tt = tally(s); gTot += tt.total; gFl += tt.fl; gDr += tt.dr; });
 			var head = '<div class="cl-lvl-row">' +
 				'<button type="button" class="cl-swatch" data-cl-color="lvl" data-cl-ckey="' + esc(lvl) + '" title="Set colour for ' + esc(lvl) + '" style="background:' + gc + '"></button>' +
 				'<span class="cl-lvl-nm">' + esc(lvl) + '</span>' +
-				'<span class="cl-lvl-mt">' + secs.length + ' section' + (secs.length > 1 ? 's' : '') + ' \u00b7 ' + gTot + ' students' + (gFl ? ' \u00b7 ' + gFl + ' flagged' : '') + '</span>' +
+				'<span class="cl-lvl-mt">' + secs.length + ' section' + (secs.length > 1 ? 's' : '') + ' \u00b7 ' + gTot + ' students' + (gFl ? ' \u00b7 ' + gFl + ' with concern' : '') + (gDr ? ' \u00b7 ' + gDr + ' dropped' : '') + '</span>' +
 				'</div>';
 			var lines = secs.map(function (s) {
 				var t = tally(s), c = sectionColor(s);
 				return '<div class="cl-line" data-cl-key="' + esc(keyOf(s)) + '" style="border-left-color:' + c + '">' +
 					'<button type="button" class="cl-swatch sm" data-cl-color="sec" data-cl-ckey="' + esc(keyOf(s)) + '" title="Set colour for this section" style="background:' + c + '"></button>' +
 					'<span class="cl-line-main"><span class="cl-line-sec">' + esc(s.section) + '</span><span class="cl-line-adv">' + esc(s.adviser || "\u2014") + (s.room ? ' \u00b7 Rm ' + esc(s.room) : '') + '</span></span>' +
-					'<span class="cl-line-tallies"><span class="cl-chip">' + t.total + '</span><span class="cl-chip m">' + t.m + ' M</span><span class="cl-chip f">' + t.f + ' F</span>' + (t.fl ? '<span class="cl-chip flag">' + t.fl + ' flagged</span>' : '') + '</span>' +
+					'<span class="cl-line-tallies"><span class="cl-chip">' + t.total + '</span><span class="cl-chip m">' + t.m + ' M</span><span class="cl-chip f">' + t.f + ' F</span>' + (t.fl ? '<span class="cl-chip flag">' + t.fl + ' with concern</span>' : '') + (t.dr ? '<span class="cl-chip dropped">' + t.dr + ' dropped</span>' : '') + '</span>' +
 					'<svg class="cl-line-arr" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>' +
 					'</div>';
 			}).join("");
@@ -202,7 +214,7 @@ SMC.classlists = (function () {
 			'<div class="cl-sec-head">' +
 			'<div><div class="cl-sec-lvl">' + esc(sec.level) + '</div><h3 class="cl-sec-title">' + esc(sec.section) + "</h3>" +
 			'<div class="cl-sec-meta">Adviser: <strong>' + esc(sec.adviser || "\u2014") + "</strong>" + (sec.room ? " &middot; Room " + esc(sec.room) : "") + "</div></div>" +
-			'<div class="cl-sec-tallies"><span class="cl-chip">' + t.total + ' total</span><span class="cl-chip m">' + t.m + ' M</span><span class="cl-chip f">' + t.f + ' F</span>' + (t.fl ? '<span class="cl-chip flag">' + t.fl + ' flagged</span>' : "") + "</div>" +
+			'<div class="cl-sec-tallies"><span class="cl-chip">' + t.total + ' total</span><span class="cl-chip m">' + t.m + ' M</span><span class="cl-chip f">' + t.f + ' F</span>' + (t.fl ? '<span class="cl-chip flag">' + t.fl + ' with concern</span>' : "") + (t.dr ? '<span class="cl-chip dropped">' + t.dr + ' dropped</span>' : "") + "</div>" +
 			"</div>" +
 			'<div class="cl-sec-tools"><div class="cl-search-wrap sm"><svg class="cl-search-ic" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg><input type="text" id="clRowSearch" class="cl-search" placeholder="Filter this roster by name or Student Number"></div></div>' +
 			'<div id="clRoster"></div>' +
@@ -220,16 +232,17 @@ SMC.classlists = (function () {
 	function groupRows(sec, sex, q) {
 		var n = 0;
 		var rows = sec.students.filter(function (st) { return st.sex === sex; }).map(function (st) {
-			n++;
 			var ef = effFlag(st);
+			var dropped = isDropped(st);
+			if (!dropped) n++;
 			if (q && (st.name + " " + st.lrn).toLowerCase().indexOf(q) === -1) return "";
-			return '<tr data-cl-row="' + esc(st.lrn) + '">' +
-				'<td class="cl-num">' + n + "</td>" +
-				'<td class="cl-nm">' + esc(st.name) + "</td>" +
+			return '<tr data-cl-row="' + esc(st.lrn) + '"' + (dropped ? ' class="cl-row-dropped"' : '') + '>' +
+				'<td class="cl-num">' + (dropped ? "\u2014" : n) + "</td>" +
+				'<td class="cl-nm">' + esc(st.name) + (dropped ? ' <span class="cl-drop-tag">Dropped</span>' : "") + "</td>" +
 				'<td class="cl-lrn">' + esc(st.lrn) + "</td>" +
 				"<td>" + statusPill(st.status) + "</td>" +
 				'<td class="cl-flagcell">' + (ef.flag ? flagBadge(ef.flag) : '<span class="cl-none">\u2014</span>') + (ef.note ? '<span class="cl-note" title="' + esc(ef.note) + '">' + esc(ef.note) + "</span>" : "") + "</td>" +
-				(isStaff() ? '<td class="cl-act"><button class="cl-mini" data-cl-edit="' + esc(st.lrn) + '">Flag</button></td>' : "") +
+				(isStaff() ? '<td class="cl-act"><button class="cl-mini" data-cl-edit="' + esc(st.lrn) + '">Concern</button></td>' : "") +
 				"</tr>";
 		}).join("");
 		return rows;
@@ -243,7 +256,7 @@ SMC.classlists = (function () {
 			var rows = groupRows(sec, sex, q);
 			if (!rows.replace(/\s/g, "")) return "";
 			return '<div class="cl-group"><div class="cl-group-h">' + title + "</div>" +
-				'<div class="cl-tbl-wrap"><table class="cl-tbl"><thead><tr><th>#</th><th>Name</th><th>Student Number</th><th>Status</th><th>Flag / Note</th>' + (isStaff() ? "<th></th>" : "") + '</tr></thead><tbody>' + rows + "</tbody></table></div></div>";
+				'<div class="cl-tbl-wrap"><table class="cl-tbl"><thead><tr><th>#</th><th>Name</th><th>Student Number</th><th>Status</th><th>Concern / Note</th>' + (isStaff() ? "<th></th>" : "") + '</tr></thead><tbody>' + rows + "</tbody></table></div></div>";
 		}
 		var html = table("Male", "M") + table("Female", "F");
 		box.innerHTML = html || '<div class="cl-empty">No students match \u201c' + esc(q) + "\u201d.</div>";
@@ -259,11 +272,11 @@ SMC.classlists = (function () {
 		m.innerHTML =
 			'<div class="cl-modal-card">' +
 			'<div class="cl-modal-h"><span id="clModalName"></span><button class="cl-modal-x" id="clModalX">&times;</button></div>' +
-			'<label class="cl-modal-lb">Guidance flag</label>' +
+			'<label class="cl-modal-lb">Guidance concern</label>' +
 			'<select id="clModalFlag" class="cl-modal-in"><option value="">None</option>' + FLAGS.map(function (f) { return '<option value="' + esc(f) + '">' + esc(f) + "</option>"; }).join("") + "</select>" +
 			'<label class="cl-modal-lb">Note</label>' +
 			'<textarea id="clModalNote" class="cl-modal-in" rows="3" placeholder="Optional note (reason, monitoring detail)"></textarea>' +
-			'<div class="cl-modal-ft"><button class="cl-btn ghost" id="clModalCancel">Cancel</button><button class="cl-btn primary" id="clModalSave">Save flag</button></div>' +
+			'<div class="cl-modal-ft"><button class="cl-btn ghost" id="clModalCancel">Cancel</button><button class="cl-btn primary" id="clModalSave">Save concern</button></div>' +
 			"</div>";
 		document.body.appendChild(m);
 		m.addEventListener("click", function (e) { if (e.target === m) closeModal(); });
@@ -289,7 +302,7 @@ SMC.classlists = (function () {
 			saveLocalFlags();
 			if (api && api.saveClassFlag) { try { api.saveClassFlag({ lrn: lrn, flag: flag, note: note }).catch(function () { }); } catch (e) { } }
 			closeModal();
-			if (ui && ui.toast) ui.toast("Flag saved on this device.", "ok");
+			if (ui && ui.toast) ui.toast("Concern saved on this device.", "ok");
 			drawRoster(sec);
 		};
 		m.classList.add("on");
@@ -302,13 +315,13 @@ SMC.classlists = (function () {
 		function rows(sex) {
 			var n = 0;
 			return sec.students.filter(function (s) { return s.sex === sex; }).map(function (st) {
-				n++; var ef = effFlag(st);
-				return "<tr><td class=\"cpn\">" + n + "</td><td>" + esc(st.name) + "</td><td>" + esc(st.lrn) + "</td><td>" + esc(st.status || "") + "</td><td>" + esc(ef.flag ? ef.flag + (ef.note ? " - " + ef.note : "") : "") + "</td></tr>";
+				var ef = effFlag(st); var dropped = isDropped(st); if (!dropped) n++;
+				return "<tr><td class=\"cpn\">" + (dropped ? "-" : n) + "</td><td>" + esc(st.name) + (dropped ? " (Dropped)" : "") + "</td><td>" + esc(st.lrn) + "</td><td>" + esc(st.status || "") + "</td><td>" + esc(ef.flag ? ef.flag + (ef.note ? " - " + ef.note : "") : "") + "</td></tr>";
 			}).join("");
 		}
 		function block(title, sex) {
 			var r = rows(sex); if (!r) return "";
-			return '<div class="cpr-grp">' + title + '</div><table class="cpr-tbl"><thead><tr><th>#</th><th>Name</th><th>Student Number</th><th>Status</th><th>Guidance Flag / Note</th></tr></thead><tbody>' + r + "</tbody></table>";
+			return '<div class="cpr-grp">' + title + '</div><table class="cpr-tbl"><thead><tr><th>#</th><th>Name</th><th>Student Number</th><th>Status</th><th>Guidance Concern / Note</th></tr></thead><tbody>' + r + "</tbody></table>";
 		}
 		var t = tally(sec);
 		area.innerHTML =
@@ -367,5 +380,5 @@ SMC.classlists = (function () {
 		state.key = k;
 		render();
 	}
-	return { render: render, setUser: setUser, load: render, searchStudents: searchStudents, openStudent: openStudent, listSections: listSections, openSection: openSection };
+	return { render: render, setUser: setUser, load: render, searchStudents: searchStudents, openStudent: openStudent, listSections: listSections, openSection: openSection, flagOf: flagOf };
 })();

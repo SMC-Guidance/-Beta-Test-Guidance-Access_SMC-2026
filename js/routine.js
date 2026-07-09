@@ -12,7 +12,7 @@ SMC.routine = (function () {
 		{ id: "gundran", name: "Ms. Gundran", levels: ["Grade 11", "Grade 5", "Grade 2", "Grade 1"] },
 		{ id: "reyes", name: "Mr. Reyes", levels: ["Grade 10", "Grade 4", "Grade 3"] }
 	];
-	var state = { desig: "all", level: "", section: "", status: "", q: "", showDropped: false };
+	var state = { desig: "all", level: "", section: "", status: "", q: "", showDropped: false, sex: "", dateFrom: "", dateTo: "", concernOnly: false };
 	var records = load();
 
 	function esc(s) { return (ui && ui.esc) ? ui.esc(s) : String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
@@ -64,6 +64,7 @@ SMC.routine = (function () {
 	}
 	function activeIn(list) { return list.filter(function (s) { return !recOf(s.lrn).dropout; }); }
 	function droppedIn(list) { return list.filter(function (s) { return recOf(s.lrn).dropout; }); }
+	function hasConcern(lrn) { return !!(SMC.classlists && SMC.classlists.flagOf && SMC.classlists.flagOf(lrn)); }
 	function sortStudents(list) {
 		return list.slice().sort(function (a, b) {
 			var d = levelIdx(a.level) - levelIdx(b.level);
@@ -105,6 +106,9 @@ SMC.routine = (function () {
 			'<select id="riLevel" class="ri-filter"></select>' +
 			'<select id="riSection" class="ri-filter"></select>' +
 			'<select id="riStatusF" class="ri-filter"><option value="">All statuses</option>' + STATUSES.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('') + '</select>' +
+			'<select id="riSex" class="ri-filter"><option value="">All sexes</option><option value="M">Male</option><option value="F">Female</option></select>' +
+			'<span class="ri-date-range"><span class="ri-date-lb">Interview</span><input type="date" id="riFrom" class="ri-filter ri-date-in" title="Interview date from"><span class="ri-date-sep">\u2013</span><input type="date" id="riTo" class="ri-filter ri-date-in" title="Interview date to"></span>' +
+			'<label class="ri-drop-toggle"><input type="checkbox" id="riConcern"> With concern</label>' +
 			'<label class="ri-drop-toggle"><input type="checkbox" id="riShowDropped"> Show dropouts</label>' +
 			'</div>' +
 			'<div class="ri-tbl-wrap"><table class="ri-tbl"><thead id="riHead"></thead><tbody id="riTbody"></tbody></table></div>' +
@@ -193,6 +197,11 @@ SMC.routine = (function () {
 		var base = scopeStudents().filter(function (s) {
 			if (state.level && s.level !== state.level) return false;
 			if (state.section && s.section !== state.section) return false;
+			if (state.sex && s.sex !== state.sex) return false;
+			if (state.concernOnly && !hasConcern(s.lrn)) return false;
+			var rdt = recOf(s.lrn).date;
+			if (state.dateFrom && (!rdt || rdt < state.dateFrom)) return false;
+			if (state.dateTo && (!rdt || rdt > state.dateTo)) return false;
 			if (q && (s.name + " " + s.lrn).toLowerCase().indexOf(q) === -1) return false;
 			return true;
 		});
@@ -253,6 +262,10 @@ SMC.routine = (function () {
 		var sec = document.getElementById("riSection"); if (sec) sec.addEventListener("change", function () { state.section = this.value; drawRows(); });
 		var stf = document.getElementById("riStatusF"); if (stf) stf.addEventListener("change", function () { state.status = this.value; drawRows(); });
 		var sd = document.getElementById("riShowDropped"); if (sd) sd.addEventListener("change", function () { state.showDropped = this.checked; buildHead(); drawRows(); });
+		var sx = document.getElementById("riSex"); if (sx) sx.addEventListener("change", function () { state.sex = this.value; drawRows(); });
+		var cf = document.getElementById("riConcern"); if (cf) cf.addEventListener("change", function () { state.concernOnly = this.checked; drawRows(); });
+		var fr = document.getElementById("riFrom"); if (fr) fr.addEventListener("change", function () { state.dateFrom = this.value; drawRows(); });
+		var to = document.getElementById("riTo"); if (to) to.addEventListener("change", function () { state.dateTo = this.value; drawRows(); });
 		var tb = document.getElementById("riTbody");
 		if (tb) {
 			tb.addEventListener("change", function (e) {
@@ -336,5 +349,5 @@ SMC.routine = (function () {
 		setTimeout(function () { window.print(); }, 60);
 	}
 
-	return { render: render, setUser: setUser, load: render };
+	return { render: render, setUser: setUser, load: render, isDropout: function (lrn) { return recOf(lrn).dropout; } };
 })();
