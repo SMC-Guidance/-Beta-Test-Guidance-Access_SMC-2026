@@ -12,7 +12,8 @@ SMC.routine = (function () {
 		{ id: "gundran", name: "Ms. Gundran", levels: ["Grade 11", "Grade 5", "Grade 2", "Grade 1"] },
 		{ id: "reyes", name: "Mr. Reyes", levels: ["Grade 10", "Grade 4", "Grade 3"] }
 	];
-	var state = { desig: "all", level: "", section: "", status: "", q: "", showDropped: false, sex: "", dateFrom: "", dateTo: "", concernOnly: false };
+	var state = { desig: "all", section: "", status: "", q: "", showDropped: false, sexes: [], types: [], concerns: [], levels: [], dateFrom: "", dateTo: "" };
+	var CONCERNS = ["Behavior", "Academic", "Close Monitoring"];
 	var records = load();
 
 	function esc(s) { return (ui && ui.esc) ? ui.esc(s) : String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
@@ -64,7 +65,14 @@ SMC.routine = (function () {
 	}
 	function activeIn(list) { return list.filter(function (s) { return !recOf(s.lrn).dropout; }); }
 	function droppedIn(list) { return list.filter(function (s) { return recOf(s.lrn).dropout; }); }
-	function hasConcern(lrn) { return !!(SMC.classlists && SMC.classlists.flagOf && SMC.classlists.flagOf(lrn)); }
+	function flagStr(lrn) { return (SMC.classlists && SMC.classlists.flagOf) ? (SMC.classlists.flagOf(lrn) || "") : ""; }
+	function concernPass(s) {
+		if (!state.concerns.length) return true;
+		var fl = flagStr(s.lrn);
+		if (state.concerns.indexOf("__any__") !== -1 && fl) return true;
+		if (fl && state.concerns.indexOf(fl) !== -1) return true;
+		return false;
+	}
 	function sortStudents(list) {
 		return list.slice().sort(function (a, b) {
 			var d = levelIdx(a.level) - levelIdx(b.level);
@@ -103,12 +111,19 @@ SMC.routine = (function () {
 			'<div class="ri-summary" id="riSummary"></div>' +
 			'<div class="ri-tools">' +
 			'<div class="ri-search-wrap"><svg class="ri-search-ic" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg><input type="text" id="riSearch" class="ri-search" placeholder="Search student name or Student Number"></div>' +
-			'<select id="riLevel" class="ri-filter"></select>' +
+			'<div class="ri-filter-wrap">' +
+			'<button type="button" class="ri-filter-btn" id="riFilterBtn"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg> Filters<span class="ri-filter-badge" id="riFilterBadge" hidden></span></button>' +
+			'<div class="ri-filter-panel" id="riFilterPanel" hidden>' +
+			'<div class="ri-fg"><div class="ri-fg-t">Sex</div><label class="ri-fck"><input type="checkbox" class="ri-fchk" data-g="sex" value="M"> Male</label><label class="ri-fck"><input type="checkbox" class="ri-fchk" data-g="sex" value="F"> Female</label></div>' +
+			'<div class="ri-fg"><div class="ri-fg-t">Student type</div><label class="ri-fck"><input type="checkbox" class="ri-fchk" data-g="type" value="NEW"> New student</label><label class="ri-fck"><input type="checkbox" class="ri-fchk" data-g="type" value="OLD"> Old student</label></div>' +
+			'<div class="ri-fg"><div class="ri-fg-t">Concern</div><label class="ri-fck"><input type="checkbox" class="ri-fchk" data-g="concern" value="__any__"> With any concern</label>' + CONCERNS.map(function (f) { return '<label class="ri-fck"><input type="checkbox" class="ri-fchk" data-g="concern" value="' + esc(f) + '"> ' + esc(f) + '</label>'; }).join('') + '</div>' +
+			'<div class="ri-fg"><div class="ri-fg-t">Grade level</div><div class="ri-lvl-checks" id="riLvlChecks"></div></div>' +
+			'<div class="ri-fg-foot"><button type="button" class="ri-fclear" id="riFilterClear">Clear all</button></div>' +
+			'</div>' +
+			'</div>' +
 			'<select id="riSection" class="ri-filter"></select>' +
 			'<select id="riStatusF" class="ri-filter"><option value="">All statuses</option>' + STATUSES.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('') + '</select>' +
-			'<select id="riSex" class="ri-filter"><option value="">All sexes</option><option value="M">Male</option><option value="F">Female</option></select>' +
 			'<span class="ri-date-range"><span class="ri-date-lb">Interview</span><input type="date" id="riFrom" class="ri-filter ri-date-in" title="Interview date from"><span class="ri-date-sep">\u2013</span><input type="date" id="riTo" class="ri-filter ri-date-in" title="Interview date to"></span>' +
-			'<label class="ri-drop-toggle"><input type="checkbox" id="riConcern"> With concern</label>' +
 			'<label class="ri-drop-toggle"><input type="checkbox" id="riShowDropped"> Show dropouts</label>' +
 			'</div>' +
 			'<div class="ri-tbl-wrap"><table class="ri-tbl"><thead id="riHead"></thead><tbody id="riTbody"></tbody></table></div>' +
@@ -142,19 +157,23 @@ SMC.routine = (function () {
 		var levels = [];
 		scope.forEach(function (s) { if (levels.indexOf(s.level) === -1) levels.push(s.level); });
 		levels.sort(function (a, b) { return levelIdx(a) - levelIdx(b); });
-		var lvlSel = document.getElementById("riLevel");
-		if (lvlSel) {
-			if (levels.indexOf(state.level) === -1) state.level = "";
-			lvlSel.innerHTML = '<option value="">All year levels</option>' + levels.map(function (l) { return '<option value="' + esc(l) + '"' + (state.level === l ? ' selected' : '') + '>' + esc(l) + '</option>'; }).join('');
-		}
+		state.levels = state.levels.filter(function (l) { return levels.indexOf(l) !== -1; });
+		var lc = document.getElementById("riLvlChecks");
+		if (lc) lc.innerHTML = levels.map(function (l) { return '<label class="ri-fck"><input type="checkbox" class="ri-fchk" data-g="level" value="' + esc(l) + '"' + (state.levels.indexOf(l) !== -1 ? ' checked' : '') + '> ' + esc(l) + '</label>'; }).join('');
 		var secs = [];
-		scope.forEach(function (s) { if ((!state.level || s.level === state.level) && secs.indexOf(s.section) === -1) secs.push(s.section); });
+		scope.forEach(function (s) { if ((!state.levels.length || state.levels.indexOf(s.level) !== -1) && secs.indexOf(s.section) === -1) secs.push(s.section); });
 		secs.sort(function (a, b) { return a.localeCompare(b); });
 		var secSel = document.getElementById("riSection");
 		if (secSel) {
 			if (secs.indexOf(state.section) === -1) state.section = "";
 			secSel.innerHTML = '<option value="">All sections</option>' + secs.map(function (s) { return '<option value="' + esc(s) + '"' + (state.section === s ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('');
 		}
+		updateFilterBadge();
+	}
+	function updateFilterBadge() {
+		var n = state.sexes.length + state.types.length + state.concerns.length + state.levels.length + (state.dateFrom ? 1 : 0) + (state.dateTo ? 1 : 0);
+		var b = document.getElementById("riFilterBadge");
+		if (b) { if (n) { b.textContent = n; b.hidden = false; } else { b.hidden = true; } }
 	}
 
 	function updateSummary() {
@@ -195,10 +214,11 @@ SMC.routine = (function () {
 		var showD = state.desig === "all";
 		var q = (state.q || "").toLowerCase().trim();
 		var base = scopeStudents().filter(function (s) {
-			if (state.level && s.level !== state.level) return false;
+			if (state.levels.length && state.levels.indexOf(s.level) === -1) return false;
 			if (state.section && s.section !== state.section) return false;
-			if (state.sex && s.sex !== state.sex) return false;
-			if (state.concernOnly && !hasConcern(s.lrn)) return false;
+			if (state.sexes.length && state.sexes.indexOf(s.sex) === -1) return false;
+			if (state.types.length && state.types.indexOf(s.status) === -1) return false;
+			if (!concernPass(s)) return false;
 			var rdt = recOf(s.lrn).date;
 			if (state.dateFrom && (!rdt || rdt < state.dateFrom)) return false;
 			if (state.dateTo && (!rdt || rdt > state.dateTo)) return false;
@@ -254,18 +274,37 @@ SMC.routine = (function () {
 		var tabs = document.getElementById("riTabs");
 		if (tabs) tabs.addEventListener("click", function (e) {
 			var b = e.target.closest(".ri-tab"); if (!b) return;
-			state.desig = b.getAttribute("data-d"); state.level = ""; state.section = "";
+			state.desig = b.getAttribute("data-d"); state.levels = []; state.section = "";
 			buildFilters(); refresh();
 		});
 		var s = document.getElementById("riSearch"); if (s) s.addEventListener("input", function () { state.q = this.value; drawRows(); });
-		var lv = document.getElementById("riLevel"); if (lv) lv.addEventListener("change", function () { state.level = this.value; buildFilters(); drawRows(); });
 		var sec = document.getElementById("riSection"); if (sec) sec.addEventListener("change", function () { state.section = this.value; drawRows(); });
 		var stf = document.getElementById("riStatusF"); if (stf) stf.addEventListener("change", function () { state.status = this.value; drawRows(); });
 		var sd = document.getElementById("riShowDropped"); if (sd) sd.addEventListener("change", function () { state.showDropped = this.checked; buildHead(); drawRows(); });
-		var sx = document.getElementById("riSex"); if (sx) sx.addEventListener("change", function () { state.sex = this.value; drawRows(); });
-		var cf = document.getElementById("riConcern"); if (cf) cf.addEventListener("change", function () { state.concernOnly = this.checked; drawRows(); });
-		var fr = document.getElementById("riFrom"); if (fr) fr.addEventListener("change", function () { state.dateFrom = this.value; drawRows(); });
-		var to = document.getElementById("riTo"); if (to) to.addEventListener("change", function () { state.dateTo = this.value; drawRows(); });
+		var fr = document.getElementById("riFrom"); if (fr) fr.addEventListener("change", function () { state.dateFrom = this.value; updateFilterBadge(); drawRows(); });
+		var to = document.getElementById("riTo"); if (to) to.addEventListener("change", function () { state.dateTo = this.value; updateFilterBadge(); drawRows(); });
+		var fb = document.getElementById("riFilterBtn"); if (fb) fb.addEventListener("click", function (e) { e.stopPropagation(); var p = document.getElementById("riFilterPanel"); if (p) p.hidden = !p.hidden; });
+		var fp = document.getElementById("riFilterPanel");
+		if (fp) {
+			fp.addEventListener("click", function (e) { e.stopPropagation(); });
+			fp.addEventListener("change", function (e) {
+				var c = e.target.closest("input.ri-fchk"); if (!c) return;
+				var g = c.getAttribute("data-g"); var v = c.value;
+				var arr = g === "sex" ? state.sexes : g === "type" ? state.types : g === "concern" ? state.concerns : state.levels;
+				var i = arr.indexOf(v);
+				if (c.checked) { if (i === -1) arr.push(v); } else if (i !== -1) { arr.splice(i, 1); }
+				if (g === "level") buildFilters();
+				updateFilterBadge(); drawRows();
+			});
+		}
+		var fcl = document.getElementById("riFilterClear");
+		if (fcl) fcl.addEventListener("click", function (e) {
+			e.stopPropagation();
+			state.sexes = []; state.types = []; state.concerns = []; state.levels = [];
+			var box = document.getElementById("riFilterPanel"); if (box) { var cks = box.querySelectorAll("input.ri-fchk"); for (var k = 0; k < cks.length; k++) cks[k].checked = false; }
+			buildFilters(); drawRows();
+		});
+		if (!window.__riDocClose) { window.__riDocClose = true; document.addEventListener("click", function () { var p = document.getElementById("riFilterPanel"); if (p && !p.hidden) p.hidden = true; }); }
 		var tb = document.getElementById("riTbody");
 		if (tb) {
 			tb.addEventListener("change", function (e) {

@@ -18,7 +18,8 @@ SMC.app = (function () {
         evalDash: { el: 'evalDashView', nav: 'navEvalDash', title: 'Evaluation Dashboard', sub: 'Results overview — teachers, averages, sections' },
         incidents: { el: 'incidentsView', nav: 'navIncidents', title: 'Incident Reports', sub: 'Log, view, print & manage incident reports' },
         classlists: { el: 'classListsView', nav: 'navClassLists', title: 'Class Lists', sub: 'Official class lists by year level \u00b7 SY 2026-2027' },
-        routine: { el: 'routineView', nav: 'navRoutine', title: 'Routine Interviews', sub: 'Track routine interviews per guidance designate' }
+        routine: { el: 'routineView', nav: 'navRoutine', title: 'Routine Interviews', sub: 'Track routine interviews per guidance designate' },
+        schedule: { el: 'scheduleView', nav: 'navSchedule', title: 'Schedules', sub: 'Browse teacher & class schedules \u00b7 SY 2026-2027' }
     };
     function isAdminUser() { return !!(user && user.role === 'admin'); }
     function maintHost() { return document.querySelector('.main') || document.body; }
@@ -103,6 +104,8 @@ SMC.app = (function () {
             SMC.classlists.render();
         if (v === 'routine' && SMC.routine)
             SMC.routine.render();
+        if (v === 'schedule' && SMC.schedule)
+            SMC.schedule.render();
     }
     function updateMaintBtn() {
         var btn = document.getElementById('maintBtn');
@@ -299,6 +302,7 @@ SMC.app = (function () {
         if (SMC.incidents && SMC.incidents.setUser) SMC.incidents.setUser(u);
         if (SMC.classlists && SMC.classlists.setUser) SMC.classlists.setUser(u);
         if (SMC.routine && SMC.routine.setUser) SMC.routine.setUser(u);
+        if (SMC.schedule && SMC.schedule.setUser) SMC.schedule.setUser(u);
         if (SMC.chat && SMC.chat.setUser) SMC.chat.setUser(u);
         window.__smcUser = u;
         startTimers(u.expiresAt);
@@ -395,6 +399,8 @@ SMC.app = (function () {
         if (navCl) navCl.addEventListener('click', function () { showView('classlists'); });
         var navRi = document.getElementById('navRoutine');
         if (navRi) navRi.addEventListener('click', function () { showView('routine'); });
+        var navSch = document.getElementById('navSchedule');
+        if (navSch) navSch.addEventListener('click', function () { showView('schedule'); });
         if (SMC.cmd && SMC.cmd.init) SMC.cmd.init();
         (function () {
             var lb = document.getElementById('lockUnlockBtn');
