@@ -27,6 +27,34 @@
 	var BREAK_RE = /^(RECESS|LUNCH|LUNCH BREAK|BREAK|DISMISSAL|SNACK|FLAG|ASSEMBLY|ANGELUS)/i;
 	function uniq(a) { var o = {}, r = []; a.forEach(function (x) { if (!o[x]) { o[x] = 1; r.push(x); } }); return r; }
 
+	// Words kept uppercase (acronyms / religious orders); titles get proper casing.
+	var KEEP = { CLE: 1, VE: 1, TLE: 1, PE: 1, MAPEH: 1, GMRC: 1, ICT: 1, HELE: 1, EPP: 1, ESP: 1, AP: 1, MTB: 1, MLE: 1, TVL: 1, HUMSS: 1, ABM: 1, STEM: 1, GAS: 1, MA: 1, FMM: 1, SM: 1, SJ: 1, OP: 1, RVM: 1, ICM: 1, II: 1, III: 1, IV: 1, VI: 1, VII: 1 };
+	var TMAP = { MR: "Mr", MS: "Ms", MRS: "Mrs", SR: "Sr", DR: "Dr", GNG: "Gng", MDM: "Mdm", STA: "Sta", ST: "St" };
+	function capWord(w) {
+		var u = w.toUpperCase();
+		if (KEEP[u]) return u;
+		if (TMAP[u]) return TMAP[u];
+		if (w.length === 1) return u;
+		if (!/[AEIOU]/i.test(w)) return u;
+		return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+	}
+	function smartTitle(s) { if (s == null) return ""; return String(s).replace(/[A-Za-z]+/g, capWord); }
+	function fmtCell(v) {
+		v = (v || "").trim();
+		if (!v) return "";
+		var m = v.match(/^(F\s*)?(\d{1,2}\s*[A-Za-z]{0,3})\s*[-\u2013]?\s+(.*)$/);
+		if (m && /\d/.test(m[2])) {
+			var code = ((m[1] ? "F " : "") + m[2].replace(/\s+/g, " ").trim()).toUpperCase();
+			var sub = (m[3] || "").replace(/^[-\u2013\s]+/, "").trim();
+			return '<span class="sch-c-code">' + esc(code) + '</span>' + (sub ? '<span class="sch-c-sub">' + esc(smartTitle(sub)) + '</span>' : "");
+		}
+		var t = v.match(/^(.*?\S)\s+((?:MR|MS|MRS|SR|DR|GNG|MDM|SIR|MAAM)\.?\s+\S.*)$/i);
+		if (t) {
+			return '<span class="sch-c-code">' + esc(smartTitle(t[1].trim())) + '</span><span class="sch-c-sub sch-c-teach">' + esc(smartTitle(t[2].trim())) + '</span>';
+		}
+		return '<span class="sch-c-plain">' + esc(smartTitle(v)) + '</span>';
+	}
+
 	function gridHtml(rec) {
 		var g = rec.grid || [];
 		if (!g.length) return '<p class="sch-empty-msg">No schedule table found.</p>';
@@ -34,7 +62,7 @@
 		var ncol = head.length;
 		var ndays = ncol - 1;
 		var h = '<div class="sch-grid-scroll"><table class="sch-grid"><thead><tr>';
-		head.forEach(function (c, i) { h += '<th' + (i === 0 ? ' class="sch-time-h"' : '') + '>' + esc(c) + '</th>'; });
+		head.forEach(function (c, i) { h += '<th' + (i === 0 ? ' class="sch-time-h"' : '') + '>' + esc(smartTitle(c)) + '</th>'; });
 		h += '</tr></thead><tbody>';
 		for (var r = 1; r < g.length; r++) {
 			var row = g[r];
@@ -49,7 +77,7 @@
 			h += '<tr><td class="sch-time">' + esc(time) + '</td>';
 			for (var d = 0; d < ndays; d++) {
 				var v = days[d] || "";
-				h += '<td' + (v.trim() ? '' : ' class="sch-empty"') + '>' + esc(v) + '</td>';
+				h += '<td class="' + (v.trim() ? 'sch-cell' : 'sch-empty') + '">' + fmtCell(v) + '</td>';
 			}
 			h += '</tr>';
 		}
@@ -75,8 +103,8 @@
 			var active = cur && r.id === cur.id;
 			var sub = r.type === "teacher" ? (r.full || "") : (r.adviser ? ("Adviser: " + r.adviser) : "");
 			return '<button type="button" class="sch-item' + (active ? ' on' : '') + '" data-id="' + esc(r.id) + '">' +
-				'<span class="sch-item-t">' + esc(r.label) + '</span>' +
-				(sub ? '<span class="sch-item-s">' + esc(sub) + '</span>' : '') +
+				'<span class="sch-item-t">' + esc(smartTitle(r.label)) + '</span>' +
+				(sub ? '<span class="sch-item-s">' + esc(smartTitle(sub)) + '</span>' : '') +
 				'</button>';
 		}).join("");
 	}
@@ -89,7 +117,7 @@
 		var sub = subOf(rec);
 		box.innerHTML =
 			'<div class="sch-detail-head">' +
-			'<div><h3 class="sch-detail-t">' + esc(rec.label) + '</h3>' + (sub ? '<p class="sch-detail-s">' + esc(sub) + '</p>' : '') + '</div>' +
+			'<div><h3 class="sch-detail-t">' + esc(smartTitle(rec.label)) + '</h3>' + (sub ? '<p class="sch-detail-s">' + esc(smartTitle(sub)) + '</p>' : '') + '</div>' +
 			'<button type="button" class="sch-print" id="schPrint"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg> Print</button>' +
 			'</div>' +
 			gridHtml(rec);
@@ -101,9 +129,9 @@
 		var sub = subOf(rec);
 		var w = window.open("", "_blank");
 		if (!w) return;
-		var css = 'body{font-family:Arial,Helvetica,sans-serif;color:#0D1B2A;padding:24px;}h1{font-size:18px;margin:0 0 2px;}p.sub{margin:0 0 14px;color:#555;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:11px;}th,td{border:1px solid #bbb;padding:5px 6px;text-align:center;vertical-align:middle;}th{background:#002B6B;color:#fff;}td.t{white-space:nowrap;font-weight:600;background:#f2f5fb;}td.band{background:#EEF2F9;font-weight:700;letter-spacing:.05em;}';
-		w.document.write('<html><head><title>' + esc(rec.label) + '</title><style>' + css + '</style></head><body>' +
-			'<h1>' + esc(rec.label) + '</h1>' + (sub ? '<p class="sub">' + esc(sub) + '</p>' : '') +
+		var css = 'body{font-family:Arial,Helvetica,sans-serif;color:#0D1B2A;padding:24px;}h1{font-size:18px;margin:0 0 2px;}p.sub{margin:0 0 14px;color:#555;font-size:12px;}table{border-collapse:collapse;width:100%;font-size:11px;}th,td{border:1px solid #bbb;padding:5px 6px;text-align:center;vertical-align:middle;}th{background:#002B6B;color:#fff;}td.t{white-space:nowrap;font-weight:600;background:#f2f5fb;}td.band{background:#EEF2F9;font-weight:700;letter-spacing:.05em;}.sch-c-code{display:block;font-weight:700;}.sch-c-sub{display:block;font-weight:400;}.sch-c-teach{color:#555;font-size:.9em;}.sch-c-plain{display:block;}';
+		w.document.write('<html><head><title>' + esc(smartTitle(rec.label)) + '</title><style>' + css + '</style></head><body>' +
+			'<h1>' + esc(smartTitle(rec.label)) + '</h1>' + (sub ? '<p class="sub">' + esc(smartTitle(sub)) + '</p>' : '') +
 			gridHtml(rec).replace(/class="sch-time"/g, 'class="t"').replace(/class="sch-band"/g, 'class="band"') +
 			'</body></html>');
 		w.document.close();

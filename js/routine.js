@@ -173,7 +173,7 @@ SMC.routine = (function () {
 	function updateFilterBadge() {
 		var n = state.sexes.length + state.types.length + state.concerns.length + state.levels.length + (state.dateFrom ? 1 : 0) + (state.dateTo ? 1 : 0);
 		var b = document.getElementById("riFilterBadge");
-		if (b) { if (n) { b.textContent = n; b.hidden = false; } else { b.hidden = true; } }
+		if (b) { if (n) { b.textContent = n; b.hidden = false; b.style.display = ""; } else { b.textContent = ""; b.hidden = true; b.style.display = "none"; } }
 	}
 
 	function updateSummary() {
