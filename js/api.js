@@ -1,17 +1,15 @@
 "use strict";
 window.SMC = window.SMC || {};
 SMC.api = (function () {
-    // Session token lives in sessionStorage (cleared when the tab/browser
-    // closes) so it does not linger on shared/school computers. See SECURITY.md.
     var TOKEN_KEY = 'smc_token';
     function getToken() { try {
-        return sessionStorage.getItem(TOKEN_KEY) || null;
+        return localStorage.getItem(TOKEN_KEY) || null;
     }
     catch (e) {
         return null;
     } }
     function setToken(t) { try {
-        t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY);
+        t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY);
     }
     catch (e) { } }
     function clearToken() { setToken(null); }
