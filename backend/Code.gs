@@ -2080,7 +2080,7 @@ function handleCreateShare(session, p){
     if(!html.trim()) throw httpError('Nothing to share.', 'BAD_REQUEST');
     if(html.length > 48000) throw httpError('This document is too large to share as a link. Print it to PDF instead.', 'TOO_LARGE');
     html = sanitizeShareHtml(html);
-    var sh = shareSheet();
+        var sh = shareSheet();
     var values = sh.getDataRange().getValues();
     var c = shareCols(values);
     var width = values[0].length;
