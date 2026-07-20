@@ -891,16 +891,41 @@ function readUsers() {
 // Replaces loose substring matching (indexOf), which could leak rows across
 // people with overlapping names (e.g. "Ann" inside "Joanna"). The field may
 // hold several designates separated by comma, semicolon, slash, pipe, or newline.
+// Normalize a name for tolerant matching: lowercases, strips common titles
+// (Mr/Mrs/Ms/Dr/etc.), turns punctuation into spaces, and collapses spaces.
+function normalizeName(s) {
+    s = String(s || '').toLowerCase();
+    s = s.replace(/[.,;\/|_\-]+/g, ' ');
+    s = s.replace(/\b(mr|mrs|ms|miss|sir|madam|maam|ma am|dr|prof|professor|teacher|engr|atty|rev|fr)\b/g, ' ');
+    s = s.replace(/\s+/g, ' ').trim();
+    return s;
+}
+// Tolerant matcher used for per-counselor record/evaluation/report visibility.
+// A key matches a field entry when either the whole normalized strings are
+// equal, OR every word of the key's full name appears in that entry (so
+// "Ms. Jane A. Cruz" still matches the user "Jane Cruz"). Single-word keys
+// (e.g. a username) must match a whole entry exactly to avoid over-sharing.
 function fieldMatchesAny(fieldValue, keys) {
-    var parts = String(fieldValue || '').toLowerCase()
+    var parts = String(fieldValue || '')
         .split(/[,;\/|\n]+/)
-        .map(function (s) { return s.trim(); })
+        .map(function (s) { return normalizeName(s); })
         .filter(function (s) { return s; });
     if (!parts.length)
         return false;
     return keys.some(function (k) {
-        k = String(k || '').trim().toLowerCase();
-        return k && parts.indexOf(k) !== -1;
+        var nk = normalizeName(k);
+        if (!nk)
+            return false;
+        if (parts.indexOf(nk) !== -1)
+            return true;
+        var kt = nk.split(' ').filter(function (t) { return t.length > 1; });
+        if (kt.length >= 2) {
+            return parts.some(function (part) {
+                var pset = part.split(' ');
+                return kt.every(function (t) { return pset.indexOf(t) !== -1; });
+            });
+        }
+        return false;
     });
 }
 function findUser(username) {
