@@ -38,6 +38,24 @@ SMC.records = (function () {
             }
         });
     }
+    function sortRows(rows) {
+        var sb = document.getElementById("sortBy");
+        var sd = document.getElementById("sortDir");
+        var key = sb ? sb.value : "date";
+        var dir = (sd ? sd.value : "desc") === "asc" ? 1 : -1;
+        return rows.slice().sort(function (a, b) {
+            if (key === "date") {
+                var at = new Date(a.date).getTime(), bt = new Date(b.date).getTime();
+                if (isNaN(at)) at = -Infinity;
+                if (isNaN(bt)) bt = -Infinity;
+                if (at === bt) return 0;
+                return (at < bt ? -1 : 1) * dir;
+            }
+            var av = (a[key] == null ? "" : String(a[key]));
+            var bv = (b[key] == null ? "" : String(b[key]));
+            return av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" }) * dir;
+        });
+    }
     function applyFilters() {
         var gv = document.getElementById('gradeFilter').value;
         var dv = document.getElementById('designateFilter').value;
@@ -65,6 +83,7 @@ SMC.records = (function () {
             }
             return true;
         });
+        filtered = sortRows(filtered);
         renderStats(filtered);
         renderTable();
         SMC.charts.render(filtered);
@@ -179,7 +198,7 @@ SMC.records = (function () {
         document.body.style.overflow = '';
     }
     function bind() {
-        ['gradeFilter', 'designateFilter', 'issueFilter', 'dateFrom', 'dateTo'].forEach(function (id) {
+        ['gradeFilter', 'designateFilter', 'issueFilter', 'dateFrom', 'dateTo', 'sortBy', 'sortDir'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el)
                 el.addEventListener('change', function () { page = 1; applyFilters(); });
