@@ -1,4 +1,76 @@
 "use strict";
+/* ============================================================================
+ *  SMC GUIDANCE - BACKEND (Code.gs)
+ *  Patched build: security fixes (issues 1-5) + non-technical admin helpers.
+ *
+ *  NEW ADMIN, NOT A PROGRAMMER? READ THIS FIRST:
+ *  You almost never touch this file. Everyday admin work (adding/removing
+ *  counselors, unlocking the site, maintenance mode, share links, etc.) is
+ *  ALL done from the website itself - see ADMIN-HANDOVER.md in the download.
+ *
+ *  You only open this file for three rare jobs:
+ *    1) First-time setup on a new Google account -> run  oneClickSetup()
+ *    2) Checking everything is healthy           -> run  healthCheck()
+ *    3) Resetting a lost admin password          -> run  resetAdmin()
+ *  AFTER ANY CHANGE HERE YOU MUST REDEPLOY:
+ *  Deploy > Manage deployments > edit the Web app > Version: New version > Deploy.
+ *  (Full steps: HOW-TO-FIX-ONLINE-SAVING.md)
+ *
+ *  SCRIPT PROPERTIES used (Project Settings > Script properties):
+ *    SHEET_ID        (required) the private Google Sheet's id
+ *    REG_CODE        (required) staff registration code
+ *    SESSION_SECRET  (required) auto-created by oneClickSetup() - signs logins
+ *    PEPPER          (required) auto-created by oneClickSetup() - password pepper
+ *    SESSION_TTL_H   (optional) login length in hours (default 4)
+ *    MAX_ATTEMPTS    (optional) failed logins before the site locks (default 10)
+ *    UNLOCK_CODE     (optional) code to lift a site lock (falls back to REG_CODE)
+ *    MAINT_CODE      (optional) maintenance passcode (falls back to UNLOCK/REG)
+ *    FORMS_FOLDER_ID (optional) Drive folder scanned for evaluation forms
+ *    MAIL_FROM / MAIL_FROM_NAME / MAIL_REPLY_TO (optional) outgoing email identity
+ *    SHARE_TTL_DAYS  (optional) how long share links live (default 7)
+ *  NEVER share PEPPER or SESSION_SECRET. They live only here.
+ * ========================================================================== */
+// One-click first-time setup for a NEW admin on a NEW Google account.
+// Safe to run repeatedly: it only fills in what is MISSING and will NOT
+// overwrite existing secrets (changing PEPPER/SESSION_SECRET would log
+// everyone out and invalidate stored passwords). Run it, then read View > Logs.
+function oneClickSetup() {
+    var p = props();
+    var made = [];
+    if (!p.getProperty('SESSION_SECRET')) { p.setProperty('SESSION_SECRET', secureRandomHex(32)); made.push('SESSION_SECRET'); }
+    if (!p.getProperty('PEPPER')) { p.setProperty('PEPPER', secureRandomHex(32)); made.push('PEPPER'); }
+    if (!p.getProperty('SESSION_TTL_H')) { p.setProperty('SESSION_TTL_H', '4'); made.push('SESSION_TTL_H'); }
+    if (!p.getProperty('MAX_ATTEMPTS')) { p.setProperty('MAX_ATTEMPTS', '10'); made.push('MAX_ATTEMPTS'); }
+    if (!p.getProperty('SHARE_TTL_DAYS')) { p.setProperty('SHARE_TTL_DAYS', '7'); made.push('SHARE_TTL_DAYS'); }
+    Logger.log(made.length ? ('Created defaults for: ' + made.join(', ')) : 'All secrets already existed - nothing changed.');
+    Logger.log('STILL REQUIRED (set these yourself in Script Properties if missing):');
+    Logger.log('  SHEET_ID = ' + (p.getProperty('SHEET_ID') ? 'set' : '>>> MISSING - paste your Google Sheet id'));
+    Logger.log('  REG_CODE = ' + (p.getProperty('REG_CODE') ? 'set' : '>>> MISSING - choose a staff registration code'));
+    Logger.log('Next: run healthCheck(), then seed the admin with resetAdmin().');
+    return 'Setup done. Open View > Logs to read the results.';
+}
+// Plain-language health report. Run it, then read View > Logs.
+function healthCheck() {
+    var p = props();
+    function yn(k) { return p.getProperty(k) ? 'OK' : 'MISSING'; }
+    Logger.log('=== SMC Guidance health check ===');
+    Logger.log('SHEET_ID ........ ' + yn('SHEET_ID'));
+    Logger.log('REG_CODE ........ ' + yn('REG_CODE'));
+    Logger.log('SESSION_SECRET .. ' + yn('SESSION_SECRET'));
+    Logger.log('PEPPER .......... ' + yn('PEPPER'));
+    Logger.log('UNLOCK_CODE ..... ' + (p.getProperty('UNLOCK_CODE') ? 'set' : 'not set (will use REG_CODE)'));
+    Logger.log('Site locked? .... ' + (secIsLocked() ? 'YES - lift it with the unlock code' : 'no'));
+    Logger.log('Maintenance? .... ' + (siteMaintOn() ? 'ON' : 'off'));
+    try {
+        var users = readUsers();
+        Logger.log('User accounts ... ' + users.length);
+        var admin = findUser('admin');
+        Logger.log('admin account ... ' + (admin ? ('OK (role ' + admin.role + ')') : '>>> MISSING - run resetAdmin()'));
+    } catch (e) {
+        Logger.log('>>> Could not read the Users sheet: ' + e.message);
+    }
+    return 'Health check complete. Open View > Logs.';
+}
 var FIELD_MAP = {
     name: 1, grade: 2, age: 3, sex: 4, referralSource: 5, teacherReferral: 6,
     modality: 7, date: 8, recordNo: 9, sessionNo: 10, issueCategory: 11,
@@ -13,13 +85,19 @@ function doPost(e) {
         var action = req.action;
         var payload = req.payload || {};
         var session = verifyToken(req.token);
-        // Site-wide maintenance: force-block EVERY request (including
-        // already-signed-in users and admins). Only the escape hatch
-        // (maintOff) and the maintenance status check (getSiteMaint) get
-        // through, so an admin can lift maintenance with the passcode.
-        if (action !== 'maintOff' && action !== 'getSiteMaint' && siteMaintOn()) {
-            var _mm = handleGetSiteMaint();
-            throw httpError(_mm.message || 'The site is temporarily down for maintenance. Please check back soon.', 'MAINTENANCE');
+        // Site-wide maintenance gate. Admins keep FULL access so they can work
+        // (and lift maintenance) during downtime, and the sign-in handshake is
+        // allowed through so an admin can log IN while maintenance is on. The
+        // escape hatch (maintOff) and status check (getSiteMaint) are always
+        // allowed. Guests and non-admin sessions get the maintenance notice.
+        if (siteMaintOn()) {
+            var _maintAlways = { maintOff: true, getSiteMaint: true };
+            var _maintAuth = { login: true, verify2fa: true, set2faEmail: true, resend2fa: true };
+            var _isAdmin = session && session.role === 'admin';
+            if (!_maintAlways[action] && !_maintAuth[action] && !_isAdmin) {
+                var _mm = handleGetSiteMaint();
+                throw httpError(_mm.message || 'The site is temporarily down for maintenance. Please check back soon.', 'MAINTENANCE');
+            }
         }
         switch (action) {
             case 'login': return ok(handleLogin(payload));
@@ -43,8 +121,8 @@ function doPost(e) {
             case 'deleteEvalConfig': return ok(handleDeleteEvalConfig(requireStaff(session), payload));
             case 'processEval': return ok(handleProcessEval(requireStaff(session), payload));
             case 'quickProcessEval': return ok(handleQuickProcess(requireStaff(session), payload));
-            case 'listForms': return ok(handleListForms(requireAuth(session)));
-            case 'getFormResponses': return ok(handleGetFormResponses(requireAuth(session), payload));
+            case 'listForms': return ok(handleListForms(requireStaff(session)));
+            case 'getFormResponses': return ok(handleGetFormResponses(requireStaff(session), payload));
             case 'getMaintenance': return ok(handleGetMaintenance(session));
             case 'setMaintenance': return ok(handleSetMaintenance(requireAdmin(session), payload));
             case 'getProfile': return ok(handleGetProfile(requireAuth(session)));
@@ -691,11 +769,31 @@ function toHex(bytes) {
 function hmacHex(message, key) {
     return toHex(Utilities.computeHmacSha256Signature(message, key));
 }
+// Cryptographic-strength random hex WITHOUT relying on Math.random().
+// Apps Script has no crypto.getRandomValues, so we mix several platform UUIDs
+// (type-4, randomly generated) through a keyed HMAC. Suitable for salts,
+// session/share tokens, and 2FA codes.
+function secureRandomHex(nBytes) {
+    nBytes = nBytes || 24;
+    var seed = '';
+    for (var i = 0; i < 6; i++)
+        seed += Utilities.getUuid() + ':';
+    var key = prop('SESSION_SECRET', 'smc-fallback-key') + ':' + Utilities.getUuid();
+    var out = '';
+    var counter = 0;
+    while (out.length < nBytes * 2) {
+        out += hmacHex(seed + counter, key);
+        counter++;
+    }
+    return out.slice(0, nBytes * 2);
+}
 function randomToken(len) {
-    var bytes = [];
-    for (var i = 0; i < (len || 24); i++)
-        bytes.push(Math.floor(Math.random() * 256));
-    return hmacHex(Utilities.getUuid() + ':' + bytes.join(','), prop('SESSION_SECRET', 'x')).slice(0, (len || 24) * 2);
+    return secureRandomHex(len || 24);
+}
+// Unpredictable 6-digit code for 2FA (no Math.random()).
+function secureCode6() {
+    var n = parseInt(secureRandomHex(4).slice(0, 8), 16);
+    return String(100000 + (n % 900000));
 }
 function hashPassword(password, salt) {
     var pepper = prop('PEPPER', '');
@@ -789,6 +887,22 @@ function readUsers() {
     }
     return out;
 }
+// Exact, normalized matching against a delimited list of names/usernames.
+// Replaces loose substring matching (indexOf), which could leak rows across
+// people with overlapping names (e.g. "Ann" inside "Joanna"). The field may
+// hold several designates separated by comma, semicolon, slash, pipe, or newline.
+function fieldMatchesAny(fieldValue, keys) {
+    var parts = String(fieldValue || '').toLowerCase()
+        .split(/[,;\/|\n]+/)
+        .map(function (s) { return s.trim(); })
+        .filter(function (s) { return s; });
+    if (!parts.length)
+        return false;
+    return keys.some(function (k) {
+        k = String(k || '').trim().toLowerCase();
+        return k && parts.indexOf(k) !== -1;
+    });
+}
 function findUser(username) {
     username = String(username || '').trim().toLowerCase();
     var users = readUsers();
@@ -864,7 +978,7 @@ function maskEmail(e) {
     return name.charAt(0) + (name.length > 2 ? '***' : '*') + dom;
 }
 function sendTwoFactorCode(u, deviceId) {
-    var code = String(Math.floor(100000 + Math.random() * 900000));
+    var code = secureCode6();
     var rec = {
         h: hmacHex(code, prop('SESSION_SECRET', 'x')),
         exp: Date.now() + 10 * 60 * 1000,
@@ -1034,8 +1148,7 @@ function handleRecords(session) {
         if (me.designate)
             keys.push(me.designate.toLowerCase());
         rows = rows.filter(function (o) {
-            var d = String(o.designate || '').toLowerCase();
-            return keys.some(function (k) { return k && d.indexOf(k) !== -1; });
+            return fieldMatchesAny(o.designate, keys);
         });
     }
     return rows;
@@ -1128,8 +1241,7 @@ function evalCell(row, idx) {
 }
 function involvesMe(session, assignedTo, checkedBy) {
     var me = [String(session.name || '').toLowerCase(), String(session.username || '').toLowerCase()];
-    var aT = String(assignedTo || '').toLowerCase(), cB = String(checkedBy || '').toLowerCase();
-    return me.some(function (k) { return k && (aT.indexOf(k) !== -1 || cB.indexOf(k) !== -1); });
+    return fieldMatchesAny(assignedTo, me) || fieldMatchesAny(checkedBy, me);
 }
 function handleListEvaluations(session) {
     var sh = sheetOrCreate('Evaluations', EVAL_HEADERS);
@@ -1872,9 +1984,8 @@ function incToObj(row, c) {
     };
 }
 function incMine(session, reportedBy) {
-    var rb = String(reportedBy || '').toLowerCase();
     var keys = [String(session.name || '').toLowerCase(), String(session.username || '').toLowerCase()];
-    return keys.some(function (k) { return k && rb.indexOf(k) !== -1; });
+    return fieldMatchesAny(reportedBy, keys);
 }
 function handleListIncidents(session) {
     var sh = incidentSheet();
@@ -1936,6 +2047,26 @@ function handleDeleteIncident(session, p) {
 }
 
 var SHARE_HEADERS = ['token','type','title','bodyClass','full','html','createdBy','createdAt','expiresAt','revoked'];
+// Server-side sanitizer for PUBLIC share pages. Share links are viewable
+// WITHOUT logging in, so we must not trust the HTML the browser sends. This
+// strips the common stored-XSS vectors: <script>/<style>/<iframe>/<object>/
+// <embed>/<template>/<noscript> blocks, standalone <link>/<meta>/<base>/<form>
+// tags, inline on* event handlers, and javascript:/vbscript:/non-image data:
+// URLs. Regex sanitizing is not a full HTML parser, so keep shared content
+// limited to the app's own formatted output.
+function sanitizeShareHtml(html) {
+    var s = String(html || '');
+    s = s.replace(/<\s*(script|style|iframe|object|embed|template|noscript)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '');
+    s = s.replace(/<\s*(script|iframe|object|embed|link|meta|base|form)\b[^>]*>/gi, '');
+    s = s.replace(/\son[a-z0-9_-]+\s*=\s*"[^"]*"/gi, '');
+    s = s.replace(/\son[a-z0-9_-]+\s*=\s*'[^']*'/gi, '');
+    s = s.replace(/\son[a-z0-9_-]+\s*=\s*[^\s>]+/gi, '');
+    s = s.replace(/(href|src|xlink:href)\s*=\s*"(\s*(?:javascript|vbscript)\s*:)[^"]*"/gi, '$1="#"');
+    s = s.replace(/(href|src|xlink:href)\s*=\s*'(\s*(?:javascript|vbscript)\s*:)[^']*'/gi, "$1='#'");
+    s = s.replace(/(href|src|xlink:href)\s*=\s*"(\s*data:(?!image\/)[^"]*)"/gi, '$1="#"');
+    s = s.replace(/(href|src|xlink:href)\s*=\s*'(\s*data:(?!image\/)[^']*)'/gi, "$1='#'");
+    return s;
+}
 function shareSheet(){ return sheetOrCreate('Shares', SHARE_HEADERS); }
 function shareCols(values){
     var head = values[0].map(function(h){ return String(h).trim().toLowerCase(); });
@@ -1948,6 +2079,7 @@ function handleCreateShare(session, p){
     var html = String(p.html || '');
     if(!html.trim()) throw httpError('Nothing to share.', 'BAD_REQUEST');
     if(html.length > 48000) throw httpError('This document is too large to share as a link. Print it to PDF instead.', 'TOO_LARGE');
+    html = sanitizeShareHtml(html);
     var sh = shareSheet();
     var values = sh.getDataRange().getValues();
     var c = shareCols(values);

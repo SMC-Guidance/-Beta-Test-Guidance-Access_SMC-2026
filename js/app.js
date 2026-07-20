@@ -402,6 +402,8 @@ SMC.app = (function () {
         var navSch = document.getElementById('navSchedule');
         if (navSch) navSch.addEventListener('click', function () { showView('schedule'); });
         if (SMC.cmd && SMC.cmd.init) SMC.cmd.init();
+        var _mas = document.getElementById('maintAdminSignin');
+        if (_mas) _mas.addEventListener('click', function () { if (SMC.cmd && SMC.cmd.open) SMC.cmd.open(); });
         (function () {
             var lb = document.getElementById('lockUnlockBtn');
             if (!lb) return;
@@ -494,8 +496,20 @@ SMC.app = (function () {
     function checkLock() { if (!api.securityStatus) return; api.securityStatus().then(function (s) { if (s && s.locked) showLock(); else hideLock(); }).catch(function () { }); }
     function showSiteMaint(msg) { var o = document.getElementById('siteMaintOverlay'); if (!o) return; var m = document.getElementById('siteMaintMsg'); if (m) m.textContent = msg || 'The site is temporarily down for maintenance. Please check back soon.'; o.classList.add('on'); o.setAttribute('aria-hidden', 'false'); }
     function hideSiteMaint() { var o = document.getElementById('siteMaintOverlay'); if (o) { o.classList.remove('on'); o.setAttribute('aria-hidden', 'true'); } }
+    function showMaintSiteBanner() {
+        var b = document.getElementById('maintSiteBanner');
+        if (!b) {
+            b = document.createElement('div');
+            b.id = 'maintSiteBanner';
+            b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2100;background:#8a1c1c;color:#fff;padding:9px 16px;font-size:.82rem;line-height:1.4;text-align:center;box-shadow:0 -4px 18px rgba(0,0,0,.28)';
+            document.body.appendChild(b);
+        }
+        b.innerHTML = 'The site is in <strong>maintenance mode</strong> \u2014 only administrators can access it right now. Everyone else sees the maintenance notice. Turn it off from the Command Center when you are done.';
+        b.style.display = '';
+    }
+    function hideMaintSiteBanner() { var b = document.getElementById('maintSiteBanner'); if (b) b.style.display = 'none'; }
     var maintNotified = false;
-    function checkSiteMaint() { if (!api.getSiteMaint) return; api.getSiteMaint().then(function (m) { if (m && m.on) { showSiteMaint(m.message); } else { hideSiteMaint(); } }).catch(function () { }); }
+    function checkSiteMaint() { if (!api.getSiteMaint) return; api.getSiteMaint().then(function (m) { var isAdmin = window.__smcUser && window.__smcUser.role === 'admin'; if (m && m.on && !isAdmin) { hideMaintSiteBanner(); showSiteMaint(m.message); } else { hideSiteMaint(); if (m && m.on && isAdmin) { showMaintSiteBanner(); } else { hideMaintSiteBanner(); } } }).catch(function () { }); }
     function setupDashClassDropdown() {
         var btn = document.getElementById('dashClassListsBtn');
         var menu = document.getElementById('dashClMenu');
