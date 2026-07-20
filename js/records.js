@@ -38,6 +38,24 @@ SMC.records = (function () {
             }
         });
     }
+    function sortRows(rows) {
+        var byEl = document.getElementById("sortBy");
+        var dirEl = document.getElementById("sortDir");
+        var by = (byEl && byEl.value) || "date";
+        var dir = (dirEl && dirEl.value) || "desc";
+        var mul = dir === "asc" ? 1 : -1;
+        var copy = rows.slice();
+        copy.sort(function (a, b) {
+            if (by === "date") {
+                var at = new Date(a.date).getTime(); if (isNaN(at)) at = 0;
+                var bt = new Date(b.date).getTime(); if (isNaN(bt)) bt = 0;
+                return (at - bt) * mul;
+            }
+            var av = String(a[by] || ""), bv = String(b[by] || "");
+            return av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" }) * mul;
+        });
+        return copy;
+    }
     function applyFilters() {
         var gv = document.getElementById('gradeFilter').value;
         var dv = document.getElementById('designateFilter').value;
@@ -65,6 +83,7 @@ SMC.records = (function () {
             }
             return true;
         });
+        filtered = sortRows(filtered);
         renderStats(filtered);
         renderTable();
         SMC.charts.render(filtered);
@@ -179,7 +198,7 @@ SMC.records = (function () {
         document.body.style.overflow = '';
     }
     function bind() {
-        ['gradeFilter', 'designateFilter', 'issueFilter', 'dateFrom', 'dateTo'].forEach(function (id) {
+        ['gradeFilter', 'designateFilter', 'issueFilter', 'dateFrom', 'dateTo', 'sortBy', 'sortDir'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el)
                 el.addEventListener('change', function () { page = 1; applyFilters(); });
