@@ -1150,6 +1150,46 @@ function handleRegister(p) {
     setUserEmail(username, email);
     return { created: true };
 }
+function autoNumberRecords(sh, rows) {
+    if (!rows || !rows.length)
+        return;
+    var recCol = FIELD_MAP.recordNo + 1;   // 1-based sheet column for Record No.
+    var sesCol = FIELD_MAP.sessionNo + 1;   // 1-based sheet column for Session No.
+    // Order chronologically by date, then by original sheet row for ties.
+    var order = rows.slice().sort(function (a, b) {
+        var da = Date.parse(a.date) || 0, db = Date.parse(b.date) || 0;
+        if (da !== db) return da - db;
+        return (a.__row || 0) - (b.__row || 0);
+    });
+    var writes = [];
+    var recCounter = 0;
+    var perStudent = {};
+    order.forEach(function (o) {
+        recCounter++;
+        var key = normalizeName(o.name);
+        perStudent[key] = (perStudent[key] || 0) + 1;
+        if (String(o.recordNo == null ? '' : o.recordNo).trim() === '') {
+            o.recordNo = String(recCounter);
+            writes.push({ row: o.__row, col: recCol, val: recCounter });
+        }
+        if (String(o.sessionNo == null ? '' : o.sessionNo).trim() === '') {
+            o.sessionNo = String(perStudent[key]);
+            writes.push({ row: o.__row, col: sesCol, val: perStudent[key] });
+        }
+    });
+    // Persist newly assigned numbers. Best-effort: never let a write failure
+    // block the dashboard from loading records.
+    if (writes.length) {
+        try {
+            writes.forEach(function (w) {
+                if (w.row) sh.getRange(w.row, w.col).setValue(w.val);
+            });
+        } catch (e) {
+            Logger.log('autoNumberRecords: could not write numbers - ' + e.message);
+        }
+    }
+}
+
 function handleRecords(session) {
     var sh = sheet('Records');
     var values = sh.getDataRange().getValues();
@@ -1165,8 +1205,14 @@ function handleRecords(session) {
             var v = raw[FIELD_MAP[k]];
             obj[k] = (v == null) ? '' : (v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(v));
         });
+        obj.__row = r + 1; // 1-based sheet row, used for auto-numbering
         rows.push(obj);
     }
+    // Auto-generate Record No. (overall sequential) and Session No. (per-student
+    // visit count) for any blank cells, and persist them back to the sheet so
+    // staff no longer have to fill these in by hand.
+    autoNumberRecords(sh, rows);
+    rows.forEach(function (o) { delete o.__row; });
     if (session.role !== 'admin') {
         var me = findUser(session.username) || {};
         var keys = [String(session.name || '').toLowerCase(), String(session.username || '').toLowerCase()];
