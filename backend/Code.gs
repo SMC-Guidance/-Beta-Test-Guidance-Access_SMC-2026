@@ -1155,7 +1155,9 @@ function autoNumberRecords(sh, rows) {
         return;
     var recCol = FIELD_MAP.recordNo + 1;   // 1-based sheet column for Record No.
     var sesCol = FIELD_MAP.sessionNo + 1;   // 1-based sheet column for Session No.
-    // Order chronologically by date, then by original sheet row for ties.
+    // Number rows by the session DATE (earliest first), tie-broken by sheet row.
+    // Record No. is the overall chronological position; Session No. is the
+    // per-student visit count in date order.
     var order = rows.slice().sort(function (a, b) {
         var da = Date.parse(a.date) || 0, db = Date.parse(b.date) || 0;
         if (da !== db) return da - db;
@@ -1168,14 +1170,17 @@ function autoNumberRecords(sh, rows) {
         recCounter++;
         var key = normalizeName(o.name);
         perStudent[key] = (perStudent[key] || 0) + 1;
-        if (String(o.recordNo == null ? '' : o.recordNo).trim() === '') {
-            o.recordNo = String(recCounter);
+        // Always (re)assign from date order so the numbers self-correct whenever
+        // rows are added or session dates change. Only write cells that actually
+        // changed, to avoid needless sheet updates.
+        var recVal = String(recCounter);
+        if (String(o.recordNo == null ? '' : o.recordNo).trim() !== recVal)
             writes.push({ row: o.__row, col: recCol, val: recCounter });
-        }
-        if (String(o.sessionNo == null ? '' : o.sessionNo).trim() === '') {
-            o.sessionNo = String(perStudent[key]);
+        o.recordNo = recVal;
+        var sesVal = String(perStudent[key]);
+        if (String(o.sessionNo == null ? '' : o.sessionNo).trim() !== sesVal)
             writes.push({ row: o.__row, col: sesCol, val: perStudent[key] });
-        }
+        o.sessionNo = sesVal;
     });
     // Persist newly assigned numbers. Best-effort: never let a write failure
     // block the dashboard from loading records.
