@@ -85,6 +85,16 @@ function doPost(e) {
         var action = req.action;
         var payload = req.payload || {};
         var session = verifyToken(req.token);
+        // Sliding session: if the caller's token is more than halfway to expiry,
+        // mint a fresh one and return it (via ok()) so active users stay signed
+        // in instead of being logged out at the hard TTL.
+        __renewToken = null;
+        if (session && session.expiresAt) {
+            var _ttlMs = (parseInt(prop('SESSION_TTL_H', '4'), 10) || 4) * 3600 * 1000;
+            if ((session.expiresAt - Date.now()) < _ttlMs / 2) {
+                __renewToken = makeToken({ username: session.username, name: session.name, role: session.role });
+            }
+        }
         // Site-wide maintenance gate. Admins keep FULL access so they can work
         // (and lift maintenance) during downtime, and the sign-in handshake is
         // allowed through so an admin can log IN while maintenance is on. The
@@ -745,7 +755,8 @@ function doGet() {
     return ContentService.createTextOutput('SMC Guidance API is running.')
         .setMimeType(ContentService.MimeType.TEXT);
 }
-function ok(data) { return json({ ok: true, data: data }); }
+var __renewToken = null;
+function ok(data) { return json({ ok: true, data: data, token: __renewToken || undefined }); }
 function fail(msg, code) { return json({ ok: false, error: msg, code: code || 'ERROR' }); }
 function json(obj) {
     return ContentService.createTextOutput(JSON.stringify(obj))

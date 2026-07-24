@@ -1,17 +1,20 @@
 "use strict";
 window.SMC = window.SMC || {};
 SMC.api = (function () {
-    // Session token lives in sessionStorage (cleared when the tab/browser
-    // closes) so it does not linger on shared/school computers. See SECURITY.md.
+    // Session token persists in localStorage so it survives closing the tab,
+    // restarting the browser, or a phone backgrounding the installed app.
+    // (It used to live in sessionStorage, which is wiped in those cases and
+    // caused the random logouts.) The session still expires server-side via
+    // SESSION_TTL_H, and renews automatically while the user is active.
     var TOKEN_KEY = 'smc_token';
     function getToken() { try {
-        return sessionStorage.getItem(TOKEN_KEY) || null;
+        return localStorage.getItem(TOKEN_KEY) || null;
     }
     catch (e) {
         return null;
     } }
     function setToken(t) { try {
-        t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY);
+        t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY);
     }
     catch (e) { } }
     function clearToken() { setToken(null); }
@@ -57,6 +60,9 @@ SMC.api = (function () {
                 err.code = res && res.code;
                 throw err;
             }
+            // Sliding session: the server returns a fresh token when the current
+            // one is past half its life, so active users are never logged out.
+            if (res.token) setToken(res.token);
             return res.data;
         });
     }
