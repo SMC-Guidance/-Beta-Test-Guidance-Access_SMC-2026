@@ -434,6 +434,69 @@ function evalOutputFolder() {
     return existing.hasNext() ? existing.next() : root.createFolder('Generated Evaluations');
 }
 
+/**
+ * Get-or-create a folder for one teacher inside "Generated Evaluations",
+ * so the output is easy to browse instead of one flat pile of files.
+ */
+function evalTeacherFolder(outFolder, teacherLabel) {
+    var name = String(teacherLabel || '').trim() || 'UNSORTED';
+    name = name.replace(/[\/\\]+/g, '-').replace(/\s+/g, ' ');
+    var existing = outFolder.getFoldersByName(name);
+    return existing.hasNext() ? existing.next() : outFolder.createFolder(name);
+}
+
+/**
+ * Lists everything already built, grouped by teacher folder, so the website
+ * can link straight to past results instead of rebuilding them.
+ */
+function handleListGeneratedEvals(session) {
+    var outFolder = evalOutputFolder();
+    var teachers = [], totalFiles = 0;
+
+    function describe(f) {
+        var when = '';
+        try {
+            var d = f.getLastUpdated();
+            if (d) when = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+        } catch (e) { /* keep going without a date */ }
+        return {
+            name: f.getName(),
+            url: f.getUrl(),
+            id: f.getId(),
+            xlsxUrl: 'https://docs.google.com/spreadsheets/d/' + f.getId() + '/export?format=xlsx',
+            updated: when
+        };
+    }
+
+    var folders = outFolder.getFolders();
+    while (folders.hasNext()) {
+        var tf = folders.next();
+        var items = [];
+        var files = tf.getFiles();
+        while (files.hasNext()) items.push(describe(files.next()));
+        items.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
+        totalFiles += items.length;
+        teachers.push({ teacher: tf.getName(), url: tf.getUrl(), files: items });
+    }
+
+    // Older builds wrote straight into the root, so surface those too.
+    var loose = [];
+    var rootFiles = outFolder.getFiles();
+    while (rootFiles.hasNext()) loose.push(describe(rootFiles.next()));
+    loose.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
+    totalFiles += loose.length;
+
+    teachers.sort(function (a, b) { return a.teacher < b.teacher ? -1 : (a.teacher > b.teacher ? 1 : 0); });
+
+    return {
+        outputFolder: outFolder.getName(),
+        outputFolderUrl: outFolder.getUrl(),
+        teachers: teachers,
+        looseFiles: loose,
+        totalFiles: totalFiles
+    };
+}
+
 /** Reads any supported response file into { name, headers, rows }. */
 function evalReadResponseFile(file) {
     var mime = file.getMimeType();
@@ -458,25 +521,34 @@ function evalReadResponseFile(file) {
 function handleListEvalBatches(session) {
     var root = formsFolder();
     var out = [];
-    var subs = root.getFolders();
-    while (subs.hasNext() && out.length < 300) {
-        var f = subs.next();
-        if (f.getName() === 'Generated Evaluations') continue;
-        var count = 0;
-        var files = f.getFiles();
-        while (files.hasNext()) {
-            if (evalIsUsableEntry(files.next())) count++;
-        }
-        out.push({ id: f.getId(), name: f.getName(), files: count });
+
+    // Only the top-level teacher folders are listed here. Counting the files
+    // inside each one meant walking the whole tree, which took ~57s on a real
+    // folder of 376 forms - far too slow just to populate a dropdown. The
+    // count is filled in when a teacher is actually previewed or built.
+    var subs = evalSubFolders(root);
+    for (var i = 0; i < subs.length && out.length < 300; i++) {
+        var f = subs[i];
+        out.push({ id: f.getId(), name: f.getName(), files: -1 });
     }
     out.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
 
+    // Files sitting directly in the root, not inside any teacher folder.
     var loose = 0, rootFiles = root.getFiles();
     while (rootFiles.hasNext()) {
-        if (evalIsUsableEntry(rootFiles.next())) loose++;
+        var rf = rootFiles.next();
+        if (rf.getMimeType() === EVAL_SHORTCUT_MIME && evalFolderFromShortcut(rf)) continue;
+        if (evalIsUsableEntry(rf)) loose++;
     }
 
-    return { folderName: root.getName(), batches: out, looseFiles: loose };
+    return {
+        folderName: root.getName(),
+        folderUrl: root.getUrl(),
+        batches: out,
+        looseFiles: loose,
+        totalFiles: -1,
+        countsSkipped: true
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -493,29 +565,66 @@ function handleBuildEvalWorkbooks(session, p) {
     var root = formsFolder();
 
     var batches = [];
+    var walkCtx = evalNewBudget();   // one shared budget for the whole request
     if (p.folderId) {
         var one = DriveApp.getFolderById(String(p.folderId));
-        batches.push({ name: one.getName(), folder: one });
+        batches.push({ name: one.getName(), folder: one, entries: evalCollectEntries(one, '', 0, {}, [], walkCtx) });
     } else {
-        var subs = root.getFolders();
-        while (subs.hasNext()) {
-            var sf = subs.next();
-            if (sf.getName() === 'Generated Evaluations') continue;
-            batches.push({ name: sf.getName(), folder: sf });
+        // One batch per teacher folder, following folder shortcuts.
+        var subs = evalSubFolders(root);
+        for (var si = 0; si < subs.length; si++) {
+            batches.push({
+                name: subs[si].getName(),
+                folder: subs[si],
+                entries: evalCollectEntries(subs[si], '', 0, {}, [], walkCtx)
+            });
         }
-        batches.push({ name: '', folder: root });   // loose files in the root
+
+        // Plus any files sitting loose in the root, grouped on their own.
+        var rootEntries = [], rootFiles = root.getFiles();
+        while (rootFiles.hasNext()) {
+            var rf = rootFiles.next();
+            if (rf.getMimeType() === EVAL_SHORTCUT_MIME && evalFolderFromShortcut(rf)) continue;
+            if (evalIsUsableEntry(rf)) rootEntries.push({ file: rf, path: '' });
+        }
+        if (rootEntries.length) batches.push({ name: '', folder: root, entries: rootEntries });
     }
 
     var outFolder = p.dryRun ? null : evalOutputFolder();
     var created = [], notes = [];
 
+    var totalEntries = 0;
+    for (var bc = 0; bc < batches.length; bc++) totalEntries += (batches[bc].entries || []).length;
+    if (!totalEntries) {
+        notes.push('Nothing readable was found in \u201c' + root.getName() + '\u201d. ' +
+            'Press Diagnose to see every file the script can see and why it was skipped.');
+    }
+    if (walkCtx.stopped) {
+        notes.push('The folder scan was cut short. ' + walkCtx.stopped +
+            ' Some teachers may be missing. Build one folder at a time if this keeps happening.');
+    }
+
+    // Reading a Google Form is a network call, and this folder can hold 376 of
+    // them. There is no way to finish them all inside Google's 6-minute ceiling,
+    // so stop cleanly with time to spare and report what is left.
+    var buildStarted = Date.now();
+    var remaining = [];
+
     for (var b = 0; b < batches.length; b++) {
         var batch = batches[b];
         var byTemplate = {};
 
-        var files = batch.folder.getFiles();
-        while (files.hasNext()) {
-            var file = files.next();
+        if (!p.folderId && (Date.now() - buildStarted) > EVAL_BUILD_BUDGET_MS) {
+            for (var rb = b; rb < batches.length; rb++) {
+                if (batches[rb].name) remaining.push(batches[rb].name);
+            }
+            break;
+        }
+
+        // Drop "(Responses)" sheets that mirror a form in the same batch.
+        var entries = evalDedupeEntries(batch.entries || [], notes);
+        for (var ei = 0; ei < entries.length; ei++) {
+            var file = entries[ei].file;
             var tables = [];
             try {
                 // Follows shortcuts, .url files, Docs and link-index Sheets.
@@ -561,7 +670,12 @@ function handleBuildEvalWorkbooks(session, p) {
                 continue;
             }
 
-            var result = evalWriteWorkbook(templateId, tk, records, fileName, outFolder, notes);
+            // Each teacher gets their own subfolder inside Generated
+            // Evaluations, so JHS and SHS files for one teacher sit
+            // together and are easy to find later.
+            var destFolder = evalTeacherFolder(outFolder, teacherLabel);
+
+            var result = evalWriteWorkbook(templateId, tk, records, fileName, destFolder, notes);
             created.push({
                 name: result.name,
                 template: EVAL_TEMPLATES[tk].label,
@@ -570,12 +684,23 @@ function handleBuildEvalWorkbooks(session, p) {
                 responses: result.responses,
                 url: result.url,
                 id: result.id,
-                xlsxUrl: result.xlsxUrl
+                xlsxUrl: result.xlsxUrl,
+                folder: destFolder.getName(),
+                folderUrl: destFolder.getUrl()
             });
         }
     }
 
+    if (remaining.length) {
+        notes.push('Stopped after ' + Math.round((Date.now() - buildStarted) / 1000) +
+            's to stay inside Google\u2019s 6-minute limit. Still to do (' + remaining.length +
+            '): ' + remaining.slice(0, 25).join(', ') +
+            (remaining.length > 25 ? ', \u2026' : '') +
+            '. Pick each one from the teacher dropdown and build it individually.');
+    }
+
     return {
+        remaining: remaining,
         generatedAt: nowStamp(),
         folderName: root.getName(),
         outputFolder: p.dryRun ? '' : outFolder.getName(),
@@ -794,16 +919,36 @@ function evalTargetsFromText(text) {
 }
 
 /** Drive API v3 lookup. Needed because DriveApp cannot follow shortcuts. */
+// Memo for the run. The same shortcut gets inspected by evalSubFolders, then
+// again by evalCollectEntries, then again by the diagnose walk. Without this
+// cache that is 3-4 network round trips per shortcut, which is what made the
+// Diagnose button feel slow.
+var __evalMetaCache = {};
+
 function evalDriveMeta(id) {
-    var url = 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) +
-        '?supportsAllDrives=true&fields=id,name,mimeType,shortcutDetails';
-    var res = UrlFetchApp.fetch(url, {
-        method: 'get',
-        muteHttpExceptions: true,
-        headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }
-    });
-    if (res.getResponseCode() !== 200) return null;
-    try { return JSON.parse(res.getContentText()); } catch (e) { return null; }
+    id = String(id);
+    if (Object.prototype.hasOwnProperty.call(__evalMetaCache, id)) {
+        return __evalMetaCache[id];
+    }
+
+    var out = null;
+    try {
+        var url = 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) +
+            '?supportsAllDrives=true&fields=id,name,mimeType,shortcutDetails';
+        var res = UrlFetchApp.fetch(url, {
+            method: 'get',
+            muteHttpExceptions: true,
+            headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }
+        });
+        if (res.getResponseCode() === 200) {
+            out = JSON.parse(res.getContentText());
+        }
+    } catch (e) {
+        out = null;
+    }
+
+    __evalMetaCache[id] = out;
+    return out;
 }
 
 /** Reads the text out of any file that might be carrying links. */
@@ -1020,6 +1165,58 @@ function evalTablesFromTargets(targets, sourceLabel, notes, depth) {
 }
 
 /** True when a Drive entry is something the builder can read or follow. */
+/**
+ * Strips Google's " (Responses)" suffix so a form and its linked response
+ * sheet collapse to the same name.
+ */
+function evalBaseName(name) {
+    return String(name || '')
+        .replace(/\s*\(responses\)\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toUpperCase();
+}
+
+/**
+ * Google auto-creates a "<Form name> (Responses)" spreadsheet next to a form.
+ * It holds the SAME answers as the form, so counting both doubles every
+ * student. Keep the form and drop the matching sheet.
+ */
+function evalDedupeEntries(entries, notes) {
+    var formNames = {};
+    var i, e;
+
+    for (i = 0; i < entries.length; i++) {
+        try {
+            if (entries[i].file.getMimeType() === MimeType.GOOGLE_FORMS) {
+                formNames[evalBaseName(entries[i].file.getName())] = true;
+            }
+        } catch (err) { /* unreadable entry, leave it for the main loop */ }
+    }
+
+    var kept = [], dropped = 0;
+    for (i = 0; i < entries.length; i++) {
+        e = entries[i];
+        var isDupeSheet = false;
+        try {
+            var nm = e.file.getName();
+            isDupeSheet = e.file.getMimeType() === MimeType.GOOGLE_SHEETS &&
+                /\(responses\)\s*$/i.test(nm) &&
+                formNames[evalBaseName(nm)] === true;
+        } catch (err) { isDupeSheet = false; }
+
+        if (isDupeSheet) { dropped++; continue; }
+        kept.push(e);
+    }
+
+    if (dropped && notes) {
+        notes.push('Ignored ' + dropped + ' \u201c(Responses)\u201d sheet' +
+            (dropped === 1 ? '' : 's') + ' that duplicate their Google Form, ' +
+            'so no student is counted twice.');
+    }
+    return kept;
+}
+
 function evalIsUsableEntry(file) {
     var mime = file.getMimeType();
     if (mime === MimeType.GOOGLE_FORMS) return true;
@@ -1093,4 +1290,397 @@ function testEvalLinkDetection() {
     var out = lines.join('\n');
     Logger.log(out);
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// Folder walking
+//
+// Two things bite here, and both caused "0 files":
+//
+//   1. DriveApp.getFolders() does NOT return folder shortcuts. A shortcut to a
+//      folder shows up in getFiles() with the shortcut mime type instead, so a
+//      folder-of-shortcuts looks completely empty.
+//   2. Files are often nested deeper than one level, e.g.
+//      Forms / JHS / PASTOR / Grade 7 / <form>. Scanning only the immediate
+//      children finds nothing.
+//
+// So: resolve folder shortcuts, and recurse.
+// ---------------------------------------------------------------------------
+
+var EVAL_MAX_DEPTH = 10;
+
+// Google kills any web-app request at 6 minutes with no result at all. These
+// caps make the scan always come back with something useful instead.
+var EVAL_TIME_BUDGET_MS = 70 * 1000;
+// Wall-clock ceiling for a whole "build everything" request. Google kills any
+// Apps Script request at 6 minutes; stopping at 4 leaves room to save results.
+var EVAL_BUILD_BUDGET_MS = 240 * 1000;
+var EVAL_MAX_FOLDERS = 400;
+
+/** Shared walk state: what we have already seen, and how much time is left. */
+function evalNewBudget() {
+    return { started: Date.now(), visited: {}, folders: 0, stopped: '' };
+}
+
+/** True once the walk must stop. Records why, so the UI can say so. */
+function evalBudgetSpent(ctx) {
+    if (ctx.stopped) return true;
+    if (ctx.folders >= EVAL_MAX_FOLDERS) {
+        ctx.stopped = 'Stopped after ' + EVAL_MAX_FOLDERS + ' folders.';
+        return true;
+    }
+    if (Date.now() - ctx.started > EVAL_TIME_BUDGET_MS) {
+        ctx.stopped = 'Stopped after ' + Math.round(EVAL_TIME_BUDGET_MS / 1000) + ' seconds.';
+        return true;
+    }
+    return false;
+}
+
+/**
+ * If this entry is a shortcut pointing at a folder, return that folder.
+ * Results are cached per run because the same shortcut is tested more than once.
+ */
+var __evalShortcutFolderCache = {};
+
+function evalFolderFromShortcut(file) {
+    if (file.getMimeType() !== EVAL_SHORTCUT_MIME) return null;
+
+    var key = file.getId();
+    if (Object.prototype.hasOwnProperty.call(__evalShortcutFolderCache, key)) {
+        return __evalShortcutFolderCache[key];
+    }
+    __evalShortcutFolderCache[key] = null;   // set before returning on any path
+
+    var meta = evalDriveMeta(file.getId());
+    var details = meta && meta.shortcutDetails;
+    if (!details || !details.targetId) return null;
+    if (details.targetMimeType !== 'application/vnd.google-apps.folder') return null;
+
+    try {
+        var folder = DriveApp.getFolderById(details.targetId);
+        __evalShortcutFolderCache[key] = folder;
+        return folder;
+    } catch (e) {
+        return null;
+    }
+}
+
+/** Direct subfolders only. Does not list files, so it is cheap. */
+function evalDirectSubFolders(folder) {
+    var out = [], seen = {};
+    var direct = folder.getFolders();
+    while (direct.hasNext()) {
+        var d = direct.next();
+        if (d.getName() === 'Generated Evaluations') continue;
+        if (seen[d.getId()]) continue;
+        seen[d.getId()] = true;
+        out.push(d);
+    }
+    return out;
+}
+
+/**
+ * Single pass over one folder's files. Listing a folder is the expensive part,
+ * so files and folder-shortcuts are gathered together rather than by listing
+ * the same folder twice.
+ * @return {{entries:Array, shortcutFolders:Array}}
+ */
+function evalScanFolderFiles(folder, pathLabel) {
+    var entries = [], shortcutFolders = [];
+    var files = folder.getFiles();
+
+    while (files.hasNext()) {
+        var file = files.next();
+
+        if (file.getMimeType() === EVAL_SHORTCUT_MIME) {
+            var target = evalFolderFromShortcut(file);
+            if (target) {
+                // A shortcut to a folder is a branch, not a readable file.
+                if (target.getName() !== 'Generated Evaluations') shortcutFolders.push(target);
+                continue;
+            }
+        }
+
+        entries.push({ file: file, path: pathLabel });
+    }
+
+    return { entries: entries, shortcutFolders: shortcutFolders };
+}
+
+/** Every real subfolder of a folder, including ones reached via shortcut. */
+function evalSubFolders(folder) {
+    var out = [], seen = {};
+
+    var direct = folder.getFolders();
+    while (direct.hasNext()) {
+        var d = direct.next();
+        if (d.getName() === 'Generated Evaluations') continue;
+        if (seen[d.getId()]) continue;
+        seen[d.getId()] = true;
+        out.push(d);
+    }
+
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+        var shortcutFolder = evalFolderFromShortcut(files.next());
+        if (!shortcutFolder) continue;
+        if (shortcutFolder.getName() === 'Generated Evaluations') continue;
+        if (seen[shortcutFolder.getId()]) continue;
+        seen[shortcutFolder.getId()] = true;
+        out.push(shortcutFolder);
+    }
+
+    return out;
+}
+
+/**
+ * Collects every readable entry under a folder, recursing into subfolders.
+ * Folder shortcuts are followed; file shortcuts are returned as-is so that
+ * evalTablesFromEntry can resolve them.
+ * @return {Array<{file:Object, path:string}>}
+ */
+function evalCollectEntries(folder, pathLabel, depth, seenFiles, out, ctx) {
+    depth = depth || 0;
+    seenFiles = seenFiles || {};
+    out = out || [];
+    ctx = ctx || evalNewBudget();
+
+    if (depth > EVAL_MAX_DEPTH || out.length >= 800) return out;
+    if (evalBudgetSpent(ctx)) return out;
+
+    // A folder must never be walked twice. Shortcuts can point at a parent, or
+    // at My Drive itself, which would otherwise loop forever.
+    var folderId = folder.getId();
+    if (ctx.visited[folderId]) return out;
+    ctx.visited[folderId] = true;
+    ctx.folders++;
+
+    // One listing of this folder gives us both its files and its shortcut branches.
+    var scan = evalScanFolderFiles(folder, pathLabel);
+
+    for (var e = 0; e < scan.entries.length && out.length < 800; e++) {
+        var entry = scan.entries[e];
+        var id = entry.file.getId();
+        if (seenFiles[id]) continue;
+        seenFiles[id] = true;
+        if (evalIsUsableEntry(entry.file)) out.push(entry);
+    }
+
+    var subs = evalDirectSubFolders(folder).concat(scan.shortcutFolders);
+    for (var i = 0; i < subs.length; i++) {
+        if (evalBudgetSpent(ctx)) return out;
+        var sub = subs[i];
+        if (ctx.visited[sub.getId()]) continue;
+        var childPath = pathLabel ? pathLabel + ' / ' + sub.getName() : sub.getName();
+        evalCollectEntries(sub, childPath, depth + 1, seenFiles, out, ctx);
+    }
+
+    return out;
+}
+
+/**
+ * Raw folder report. Lists EVERY entry with its real mime type, so a folder
+ * that appears empty can be diagnosed without guessing.
+ */
+function handleDiagnoseEvalFolder(session) {
+    var root = formsFolder();
+    var rows = [];
+    var counts = { usable: 0, skipped: 0, folders: 0, shortcutFolders: 0, loops: 0 };
+    var ctx = evalNewBudget();
+
+    function walk(folder, pathLabel, depth) {
+        if (depth > EVAL_MAX_DEPTH || rows.length >= 400) return;
+        if (evalBudgetSpent(ctx)) return;
+
+        // Never walk the same folder twice; shortcuts can form loops.
+        var fid = folder.getId();
+        if (ctx.visited[fid]) { counts.loops++; return; }
+        ctx.visited[fid] = true;
+        ctx.folders++;
+
+        var branches = [];   // folder shortcuts found while listing, walked below
+        var files = folder.getFiles();
+        while (files.hasNext() && rows.length < 400) {
+            var file = files.next();
+            var mime = file.getMimeType();
+            var target = '';
+
+            if (mime === EVAL_SHORTCUT_MIME) {
+                var meta = evalDriveMeta(file.getId());
+                var details = meta && meta.shortcutDetails;
+                target = details ? (details.targetMimeType || 'unknown target') : 'UNRESOLVED';
+                if (details && details.targetMimeType === 'application/vnd.google-apps.folder') {
+                    counts.shortcutFolders++;
+                    var branch = evalFolderFromShortcut(file);
+                    if (branch) branches.push(branch);
+                    rows.push({
+                        path: pathLabel, name: file.getName(), mime: 'shortcut -> folder',
+                        usable: true, note: 'followed as a subfolder'
+                    });
+                    continue;
+                }
+            }
+
+            var usable = evalIsUsableEntry(file);
+            if (usable) counts.usable++; else counts.skipped++;
+            rows.push({
+                path: pathLabel,
+                name: file.getName(),
+                mime: mime + (target ? ' -> ' + target : ''),
+                usable: usable,
+                note: usable ? '' : 'not a readable type'
+            });
+        }
+
+        // Reuse the listing above instead of listing this folder a second time.
+        var subs = evalDirectSubFolders(folder).concat(branches);
+        counts.folders += subs.length;
+        for (var i = 0; i < subs.length; i++) {
+            if (evalBudgetSpent(ctx)) return;
+            var sub = subs[i];
+            if (ctx.visited[sub.getId()]) { counts.loops++; continue; }
+            walk(sub, pathLabel ? pathLabel + ' / ' + sub.getName() : sub.getName(), depth + 1);
+        }
+    }
+
+    walk(root, '', 0);
+
+    return {
+        folderName: root.getName(),
+        folderId: root.getId(),
+        folderUrl: root.getUrl(),
+        counts: counts,
+        entries: rows,
+        elapsedMs: Date.now() - ctx.started,
+        stopped: ctx.stopped,
+        capped: rows.length >= 400 || !!ctx.stopped
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Run-in-the-editor diagnostics
+//
+// "Failed to fetch" is a browser-level error: the request never came back.
+// The website cannot tell you anything useful in that case. These functions
+// run directly inside the Apps Script editor, so they bypass the web app,
+// the deployment, and the network completely. Whatever is really wrong shows
+// up in the execution log.
+//
+// How to run: open the Apps Script editor, pick the function name from the
+// dropdown at the top, press Run, then read the log at the bottom.
+// ---------------------------------------------------------------------------
+
+/**
+ * Prints the full folder report to the log. Same work the Diagnose button
+ * does, minus the web app.
+ */
+function testDiagnoseFolder() {
+    var t0 = Date.now();
+    var out = [];
+
+    out.push('=== Folder diagnosis ===');
+
+    var folderId = prop('FORMS_FOLDER_ID', '');
+    out.push('FORMS_FOLDER_ID  : ' + (folderId || '(NOT SET)'));
+    if (!folderId) {
+        out.push('');
+        out.push('STOP: FORMS_FOLDER_ID is not set.');
+        out.push('Project Settings > Script Properties > add FORMS_FOLDER_ID = the folder id.');
+        Logger.log(out.join('\n'));
+        return out.join('\n');
+    }
+
+    var root;
+    try {
+        root = formsFolder();
+        out.push('Folder name      : ' + root.getName());
+        out.push('Folder URL       : ' + root.getUrl());
+    } catch (e) {
+        out.push('');
+        out.push('STOP: cannot open that folder: ' + (e.message || e));
+        out.push('Either the id is wrong, or this Google account cannot see the folder.');
+        out.push('Signed in as: ' + evalWhoAmI());
+        Logger.log(out.join('\n'));
+        return out.join('\n');
+    }
+
+    out.push('Running as       : ' + evalWhoAmI());
+    out.push('Template id      : ' + (prop('EVAL_TEMPLATE_ID', '') || '(NOT SET - Build will fail)'));
+    out.push('');
+
+    var res;
+    try {
+        res = handleDiagnoseEvalFolder(null);
+    } catch (e) {
+        out.push('The scan itself threw an error: ' + (e.message || e));
+        out.push((e.stack || '').split('\n').slice(0, 5).join('\n'));
+        Logger.log(out.join('\n'));
+        return out.join('\n');
+    }
+
+    var c = res.counts || {};
+    out.push('Readable files   : ' + (c.usable || 0));
+    out.push('Skipped files    : ' + (c.skipped || 0));
+    out.push('Subfolders       : ' + (c.folders || 0));
+    out.push('Folder shortcuts : ' + (c.shortcutFolders || 0));
+    out.push('Shortcut loops   : ' + (c.loops || 0));
+    out.push('Scan time        : ' + ((res.elapsedMs || 0) / 1000).toFixed(1) + 's');
+    if (res.stopped) out.push('CUT SHORT        : ' + res.stopped);
+    out.push('');
+
+    var rows = res.entries || [];
+    if (!rows.length) {
+        out.push('No files at all were visible inside that folder.');
+        out.push('Check that the folder is shared with ' + evalWhoAmI() + '.');
+    } else {
+        out.push('--- entries ---');
+        for (var i = 0; i < rows.length && i < 100; i++) {
+            var r = rows[i];
+            out.push((r.usable ? 'USE  ' : 'SKIP ') +
+                (r.path ? '[' + r.path + '] ' : '[root] ') +
+                r.name + '   (' + r.mime + ')');
+        }
+        if (rows.length > 100) out.push('... and ' + (rows.length - 100) + ' more');
+    }
+
+    out.push('');
+    out.push('Total time: ' + ((Date.now() - t0) / 1000).toFixed(1) + 's');
+
+    var text = out.join('\n');
+    Logger.log(text);
+    return text;
+}
+
+/** Which Google account this script actually runs as. */
+function evalWhoAmI() {
+    try {
+        var who = Session.getEffectiveUser().getEmail();
+        return who || '(unknown - no email permission)';
+    } catch (e) {
+        return '(unknown)';
+    }
+}
+
+/**
+ * Confirms the three eval actions are wired into doPost. If any say MISSING,
+ * that is why the website reports an unknown action.
+ */
+function testEvalWiring() {
+    var out = ['=== Wiring check ==='];
+    var names = ['handleListEvalBatches', 'handleBuildEvalWorkbooks', 'handleDiagnoseEvalFolder'];
+
+    var g = (typeof globalThis !== 'undefined') ? globalThis : this;
+    for (var i = 0; i < names.length; i++) {
+        var fn = g[names[i]];
+        out.push((typeof fn === 'function' ? 'OK      ' : 'MISSING ') + names[i]);
+    }
+
+    out.push('');
+    out.push('If all three say OK but the website still fails, the problem is the');
+    out.push('deployment, not the code. Deploy > Manage deployments > pencil >');
+    out.push('New version > Deploy. Also confirm "Who has access" is set to Anyone.');
+
+    var text = out.join('\n');
+    Logger.log(text);
+    return text;
 }
