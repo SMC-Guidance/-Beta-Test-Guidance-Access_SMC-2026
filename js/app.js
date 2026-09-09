@@ -17,7 +17,9 @@ SMC.app = (function () {
         profile: { el: 'profileView', nav: 'navProfile', title: 'My Profile', sub: 'Your photo, notes & profile guide' },
         evalDash: { el: 'evalDashView', nav: 'navEvalDash', title: 'Evaluation Dashboard', sub: 'Results overview — teachers, averages, sections' },
         incidents: { el: 'incidentsView', nav: 'navIncidents', title: 'Incident Reports', sub: 'Log, view, print & manage incident reports' },
-        classlists: { el: 'classListsView', nav: 'navClassLists', title: 'Class Lists', sub: 'Official class lists by year level \u00b7 SY 2026-2027' }
+        classlists: { el: 'classListsView', nav: 'navClassLists', title: 'Class Lists', sub: 'Official class lists by year level \u00b7 SY 2026-2027' },
+        routine: { el: 'routineView', nav: 'navRoutine', title: 'Routine Interviews', sub: 'Track routine interviews per guidance designate' },
+        schedule: { el: 'scheduleView', nav: 'navSchedule', title: 'Schedules', sub: 'Browse teacher & class schedules \u00b7 SY 2026-2027' }
     };
     function isAdminUser() { return !!(user && user.role === 'admin'); }
     function maintHost() { return document.querySelector('.main') || document.body; }
@@ -100,6 +102,10 @@ SMC.app = (function () {
             SMC.incidents.render();
         if (v === 'classlists' && SMC.classlists)
             SMC.classlists.render();
+        if (v === 'routine' && SMC.routine)
+            SMC.routine.render();
+        if (v === 'schedule' && SMC.schedule)
+            SMC.schedule.render();
     }
     function updateMaintBtn() {
         var btn = document.getElementById('maintBtn');
@@ -274,10 +280,10 @@ SMC.app = (function () {
         var initial = (u.name || '?').charAt(0).toUpperCase();
         document.getElementById('sbAv').textContent = initial;
         document.getElementById('sbName').textContent = u.name;
-        document.getElementById('sbRole').textContent = u.role;
+        document.getElementById('sbRole').textContent = (u.role === 'counselor' ? 'Guidance Designate' : u.role);
         var pmAvEl = document.getElementById('pmAv'); if (pmAvEl) pmAvEl.textContent = initial;
         var pmNameEl = document.getElementById('pmName'); if (pmNameEl) pmNameEl.textContent = u.name;
-        var pmRoleEl = document.getElementById('pmRole'); if (pmRoleEl) pmRoleEl.textContent = u.role;
+        var pmRoleEl = document.getElementById('pmRole'); if (pmRoleEl) pmRoleEl.textContent = (u.role === 'counselor' ? 'Guidance Designate' : u.role);
         var staff = u.role === 'admin' || u.role === 'co-admin';
         document.getElementById('navCounselors').style.display = staff ? '' : 'none';
         var neg = document.getElementById('navEvalGroup'); if (neg) neg.style.display = '';
@@ -295,12 +301,16 @@ SMC.app = (function () {
         if (SMC.settings && SMC.settings.setUser) SMC.settings.setUser(u);
         if (SMC.incidents && SMC.incidents.setUser) SMC.incidents.setUser(u);
         if (SMC.classlists && SMC.classlists.setUser) SMC.classlists.setUser(u);
+        if (SMC.routine && SMC.routine.setUser) SMC.routine.setUser(u);
+        if (SMC.schedule && SMC.schedule.setUser) SMC.schedule.setUser(u);
         if (SMC.chat && SMC.chat.setUser) SMC.chat.setUser(u);
         window.__smcUser = u;
         startTimers(u.expiresAt);
         showScreen('appScreen');
         showView('dashboard');
         maybeShowWhatsNew();
+        checkSiteMaint();
+        if (!window.__smcMaintTimer) window.__smcMaintTimer = setInterval(checkSiteMaint, 60000);
         loadData();
         refreshEvalStats();
         updateSearchVisibility();
@@ -326,6 +336,8 @@ SMC.app = (function () {
         SMC.charts.destroy();
     }
     function init() {
+        if (SMC.share && SMC.share.check()) return;
+        if (SMC.share && SMC.share.bind) SMC.share.bind();
         SMC.auth.bind();
         SMC.records.bind();
         bindCounselors();
@@ -385,7 +397,13 @@ SMC.app = (function () {
         setupDashStudentSearch();
         var navCl = document.getElementById('navClassLists');
         if (navCl) navCl.addEventListener('click', function () { showView('classlists'); });
+        var navRi = document.getElementById('navRoutine');
+        if (navRi) navRi.addEventListener('click', function () { showView('routine'); });
+        var navSch = document.getElementById('navSchedule');
+        if (navSch) navSch.addEventListener('click', function () { showView('schedule'); });
         if (SMC.cmd && SMC.cmd.init) SMC.cmd.init();
+        var _mas = document.getElementById('maintAdminSignin');
+        if (_mas) _mas.addEventListener('click', function () { if (SMC.cmd && SMC.cmd.open) SMC.cmd.open(); });
         (function () {
             var lb = document.getElementById('lockUnlockBtn');
             if (!lb) return;
@@ -407,6 +425,9 @@ SMC.app = (function () {
             if (lc) lc.addEventListener('keydown', function (e) { if (e.key === 'Enter') lb.click(); });
         })();
         checkLock();
+        checkSiteMaint();
+        if (!window.__smcMaintTimer) window.__smcMaintTimer = setInterval(checkSiteMaint, 60000);
+        window.addEventListener('storage', function (e) { if (e.key === 'smc_token') location.reload(); });
         var mb = document.getElementById('maintBtn');
         if (mb)
             mb.addEventListener('click', toggleMaintenance);
@@ -473,6 +494,22 @@ SMC.app = (function () {
     function showLock() { var o = document.getElementById('lockOverlay'); if (o) { o.classList.add('on'); o.setAttribute('aria-hidden', 'false'); } }
     function hideLock() { var o = document.getElementById('lockOverlay'); if (o) { o.classList.remove('on'); o.setAttribute('aria-hidden', 'true'); } }
     function checkLock() { if (!api.securityStatus) return; api.securityStatus().then(function (s) { if (s && s.locked) showLock(); else hideLock(); }).catch(function () { }); }
+    function showSiteMaint(msg) { var o = document.getElementById('siteMaintOverlay'); if (!o) return; var m = document.getElementById('siteMaintMsg'); if (m) m.textContent = msg || 'The site is temporarily down for maintenance. Please check back soon.'; o.classList.add('on'); o.setAttribute('aria-hidden', 'false'); }
+    function hideSiteMaint() { var o = document.getElementById('siteMaintOverlay'); if (o) { o.classList.remove('on'); o.setAttribute('aria-hidden', 'true'); } }
+    function showMaintSiteBanner() {
+        var b = document.getElementById('maintSiteBanner');
+        if (!b) {
+            b = document.createElement('div');
+            b.id = 'maintSiteBanner';
+            b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2100;background:#8a1c1c;color:#fff;padding:9px 16px;font-size:.82rem;line-height:1.4;text-align:center;box-shadow:0 -4px 18px rgba(0,0,0,.28)';
+            document.body.appendChild(b);
+        }
+        b.innerHTML = 'The site is in <strong>maintenance mode</strong> \u2014 only administrators can access it right now. Everyone else sees the maintenance notice. Turn it off from the Command Center when you are done.';
+        b.style.display = '';
+    }
+    function hideMaintSiteBanner() { var b = document.getElementById('maintSiteBanner'); if (b) b.style.display = 'none'; }
+    var maintNotified = false;
+    function checkSiteMaint() { if (!api.getSiteMaint) return; api.getSiteMaint().then(function (m) { var isAdmin = window.__smcUser && window.__smcUser.role === 'admin'; if (m && m.on && !isAdmin) { hideMaintSiteBanner(); showSiteMaint(m.message); } else { hideSiteMaint(); if (m && m.on && isAdmin) { showMaintSiteBanner(); } else { hideMaintSiteBanner(); } } }).catch(function () { }); }
     function setupDashClassDropdown() {
         var btn = document.getElementById('dashClassListsBtn');
         var menu = document.getElementById('dashClMenu');
@@ -526,7 +563,7 @@ SMC.app = (function () {
         inp.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
         document.addEventListener('click', function (e) { if (e.target !== inp && !box.contains(e.target)) close(); });
     }
-    var wnOpen = null, wnIntroOpen = null;
+    var wnOpen = null, wnIntroOpen = null, tourSeenKey = 'smc-tour-seen';
     function setupWhatsNew() {
         var ov = document.getElementById('tour');
         if (!ov) return;
@@ -586,31 +623,22 @@ SMC.app = (function () {
             if (v) showView(v);
             setTimeout(place, v ? 130 : 0);
         }
-        function markSeen() { try { localStorage.setItem('smc-whatsnew-2026-07i', '1'); } catch (e) { } }
+        function markSeen() { try { localStorage.setItem(tourSeenKey, '1'); } catch (e) { } }
         function close() { ov.classList.remove('on'); ov.setAttribute('aria-hidden', 'true'); clearOpen(); markSeen(); window.removeEventListener('resize', place); }
         back.addEventListener('click', function () { if (i > 0) { i--; render(); } });
         next.addEventListener('click', function () { if (i < steps.length - 1) { i++; render(); } else close(); });
         if (xB) xB.addEventListener('click', close);
         wnOpen = function () { i = 0; ov.classList.add('on'); ov.setAttribute('aria-hidden', 'false'); render(); window.addEventListener('resize', place); };
-        var intro = document.getElementById('wnIntro');
-        if (intro) {
-            var startB = document.getElementById('wnIntroStart');
-            var skipB = document.getElementById('wnIntroSkip');
-            var introX = document.getElementById('wnIntroX');
-            var introClose = function (seen) { intro.classList.remove('on'); intro.setAttribute('aria-hidden', 'true'); if (seen) markSeen(); };
-            if (startB) startB.addEventListener('click', function () { introClose(false); wnOpen(); });
-            if (skipB) skipB.addEventListener('click', function () { introClose(true); });
-            if (introX) introX.addEventListener('click', function () { introClose(true); });
-            wnIntroOpen = function () { intro.classList.add('on'); intro.setAttribute('aria-hidden', 'false'); };
-        }
-        var reopen = document.getElementById('wnReopen');
-        if (reopen) reopen.addEventListener('click', function () { if (wnIntroOpen) wnIntroOpen(); else if (wnOpen) wnOpen(); });
+        // "What's New" intro modal and its reopen button were removed. New users
+        // now get the feature tour automatically on first login (see maybeShowWhatsNew).
     }
     function maybeShowWhatsNew() {
-        try { if (localStorage.getItem('smc-whatsnew-2026-07i')) return; } catch (e) { }
-        if (wnIntroOpen) setTimeout(wnIntroOpen, 700);
-        else if (wnOpen) setTimeout(wnOpen, 700);
+        var key = 'smc-tour-seen';
+        try { if (user && user.username) key += '-' + String(user.username).toLowerCase(); } catch (e) { }
+        tourSeenKey = key;
+        try { if (localStorage.getItem(key)) return; } catch (e) { }
+        if (wnOpen) setTimeout(wnOpen, 800);
     }
-    return { init: init, boot: boot, reset: reset, showScreen: showScreen, refreshEvalStats: refreshEvalStats, showTutorial: showTutorial, go: function (v) { showView(v); }, showLock: showLock, hideLock: hideLock, checkLock: checkLock };
+    return { init: init, boot: boot, reset: reset, showScreen: showScreen, refreshEvalStats: refreshEvalStats, showTutorial: showTutorial, go: function (v) { showView(v); }, showLock: showLock, hideLock: hideLock, checkLock: checkLock, showSiteMaint: showSiteMaint, hideSiteMaint: hideSiteMaint, checkSiteMaint: checkSiteMaint };
 })();
 window.addEventListener('DOMContentLoaded', SMC.app.init);

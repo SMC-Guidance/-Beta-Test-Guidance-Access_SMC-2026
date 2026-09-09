@@ -1,4 +1,76 @@
 "use strict";
+/* ============================================================================
+ *  SMC GUIDANCE - BACKEND (Code.gs)
+ *  Patched build: security fixes (issues 1-5) + non-technical admin helpers.
+ *
+ *  NEW ADMIN, NOT A PROGRAMMER? READ THIS FIRST:
+ *  You almost never touch this file. Everyday admin work (adding/removing
+ *  counselors, unlocking the site, maintenance mode, share links, etc.) is
+ *  ALL done from the website itself - see ADMIN-HANDOVER.md in the download.
+ *
+ *  You only open this file for three rare jobs:
+ *    1) First-time setup on a new Google account -> run  oneClickSetup()
+ *    2) Checking everything is healthy           -> run  healthCheck()
+ *    3) Resetting a lost admin password          -> run  resetAdmin()
+ *  AFTER ANY CHANGE HERE YOU MUST REDEPLOY:
+ *  Deploy > Manage deployments > edit the Web app > Version: New version > Deploy.
+ *  (Full steps: HOW-TO-FIX-ONLINE-SAVING.md)
+ *
+ *  SCRIPT PROPERTIES used (Project Settings > Script properties):
+ *    SHEET_ID        (required) the private Google Sheet's id
+ *    REG_CODE        (required) staff registration code
+ *    SESSION_SECRET  (required) auto-created by oneClickSetup() - signs logins
+ *    PEPPER          (required) auto-created by oneClickSetup() - password pepper
+ *    SESSION_TTL_H   (optional) login length in hours (default 4)
+ *    MAX_ATTEMPTS    (optional) failed logins before the site locks (default 10)
+ *    UNLOCK_CODE     (optional) code to lift a site lock (falls back to REG_CODE)
+ *    MAINT_CODE      (optional) maintenance passcode (falls back to UNLOCK/REG)
+ *    FORMS_FOLDER_ID (optional) Drive folder scanned for evaluation forms
+ *    MAIL_FROM / MAIL_FROM_NAME / MAIL_REPLY_TO (optional) outgoing email identity
+ *    SHARE_TTL_DAYS  (optional) how long share links live (default 7)
+ *  NEVER share PEPPER or SESSION_SECRET. They live only here.
+ * ========================================================================== */
+// One-click first-time setup for a NEW admin on a NEW Google account.
+// Safe to run repeatedly: it only fills in what is MISSING and will NOT
+// overwrite existing secrets (changing PEPPER/SESSION_SECRET would log
+// everyone out and invalidate stored passwords). Run it, then read View > Logs.
+function oneClickSetup() {
+    var p = props();
+    var made = [];
+    if (!p.getProperty('SESSION_SECRET')) { p.setProperty('SESSION_SECRET', secureRandomHex(32)); made.push('SESSION_SECRET'); }
+    if (!p.getProperty('PEPPER')) { p.setProperty('PEPPER', secureRandomHex(32)); made.push('PEPPER'); }
+    if (!p.getProperty('SESSION_TTL_H')) { p.setProperty('SESSION_TTL_H', '4'); made.push('SESSION_TTL_H'); }
+    if (!p.getProperty('MAX_ATTEMPTS')) { p.setProperty('MAX_ATTEMPTS', '10'); made.push('MAX_ATTEMPTS'); }
+    if (!p.getProperty('SHARE_TTL_DAYS')) { p.setProperty('SHARE_TTL_DAYS', '7'); made.push('SHARE_TTL_DAYS'); }
+    Logger.log(made.length ? ('Created defaults for: ' + made.join(', ')) : 'All secrets already existed - nothing changed.');
+    Logger.log('STILL REQUIRED (set these yourself in Script Properties if missing):');
+    Logger.log('  SHEET_ID = ' + (p.getProperty('SHEET_ID') ? 'set' : '>>> MISSING - paste your Google Sheet id'));
+    Logger.log('  REG_CODE = ' + (p.getProperty('REG_CODE') ? 'set' : '>>> MISSING - choose a staff registration code'));
+    Logger.log('Next: run healthCheck(), then seed the admin with resetAdmin().');
+    return 'Setup done. Open View > Logs to read the results.';
+}
+// Plain-language health report. Run it, then read View > Logs.
+function healthCheck() {
+    var p = props();
+    function yn(k) { return p.getProperty(k) ? 'OK' : 'MISSING'; }
+    Logger.log('=== SMC Guidance health check ===');
+    Logger.log('SHEET_ID ........ ' + yn('SHEET_ID'));
+    Logger.log('REG_CODE ........ ' + yn('REG_CODE'));
+    Logger.log('SESSION_SECRET .. ' + yn('SESSION_SECRET'));
+    Logger.log('PEPPER .......... ' + yn('PEPPER'));
+    Logger.log('UNLOCK_CODE ..... ' + (p.getProperty('UNLOCK_CODE') ? 'set' : 'not set (will use REG_CODE)'));
+    Logger.log('Site locked? .... ' + (secIsLocked() ? 'YES - lift it with the unlock code' : 'no'));
+    Logger.log('Maintenance? .... ' + (siteMaintOn() ? 'ON' : 'off'));
+    try {
+        var users = readUsers();
+        Logger.log('User accounts ... ' + users.length);
+        var admin = findUser('admin');
+        Logger.log('admin account ... ' + (admin ? ('OK (role ' + admin.role + ')') : '>>> MISSING - run resetAdmin()'));
+    } catch (e) {
+        Logger.log('>>> Could not read the Users sheet: ' + e.message);
+    }
+    return 'Health check complete. Open View > Logs.';
+}
 var FIELD_MAP = {
     name: 1, grade: 2, age: 3, sex: 4, referralSource: 5, teacherReferral: 6,
     modality: 7, date: 8, recordNo: 9, sessionNo: 10, issueCategory: 11,
@@ -13,9 +85,36 @@ function doPost(e) {
         var action = req.action;
         var payload = req.payload || {};
         var session = verifyToken(req.token);
+        // Sliding session: if the caller's token is more than halfway to expiry,
+        // mint a fresh one and return it (via ok()) so active users stay signed
+        // in instead of being logged out at the hard TTL.
+        __renewToken = null;
+        if (session && session.expiresAt) {
+            var _ttlMs = (parseInt(prop('SESSION_TTL_H', '4'), 10) || 4) * 3600 * 1000;
+            if ((session.expiresAt - Date.now()) < _ttlMs / 2) {
+                __renewToken = makeToken({ username: session.username, name: session.name, role: session.role });
+            }
+        }
+        // Site-wide maintenance gate. Admins keep FULL access so they can work
+        // (and lift maintenance) during downtime, and the sign-in handshake is
+        // allowed through so an admin can log IN while maintenance is on. The
+        // escape hatch (maintOff) and status check (getSiteMaint) are always
+        // allowed. Guests and non-admin sessions get the maintenance notice.
+        if (siteMaintOn()) {
+            var _maintAlways = { maintOff: true, getSiteMaint: true };
+            var _maintAuth = { login: true, verify2fa: true, set2faEmail: true, resend2fa: true };
+            var _isAdmin = session && session.role === 'admin';
+            if (!_maintAlways[action] && !_maintAuth[action] && !_isAdmin) {
+                var _mm = handleGetSiteMaint();
+                throw httpError(_mm.message || 'The site is temporarily down for maintenance. Please check back soon.', 'MAINTENANCE');
+            }
+        }
         switch (action) {
             case 'login': return ok(handleLogin(payload));
             case 'register': return ok(handleRegister(payload));
+            case 'verify2fa': return ok(handleVerify2fa(payload));
+            case 'set2faEmail': return ok(handleSet2faEmail(payload));
+            case 'resend2fa': return ok(handleResend2fa(payload));
             case 'publicStats': return ok(handlePublicStats());
             case 'me': return ok(requireAuth(session));
             case 'records': return ok(handleRecords(requireAuth(session)));
@@ -32,8 +131,8 @@ function doPost(e) {
             case 'deleteEvalConfig': return ok(handleDeleteEvalConfig(requireStaff(session), payload));
             case 'processEval': return ok(handleProcessEval(requireStaff(session), payload));
             case 'quickProcessEval': return ok(handleQuickProcess(requireStaff(session), payload));
-            case 'listForms': return ok(handleListForms(requireAuth(session)));
-            case 'getFormResponses': return ok(handleGetFormResponses(requireAuth(session), payload));
+            case 'listForms': return ok(handleListForms(requireStaff(session)));
+            case 'getFormResponses': return ok(handleGetFormResponses(requireStaff(session), payload));
             case 'getMaintenance': return ok(handleGetMaintenance(session));
             case 'setMaintenance': return ok(handleSetMaintenance(requireAdmin(session), payload));
             case 'getProfile': return ok(handleGetProfile(requireAuth(session)));
@@ -50,6 +149,8 @@ function doPost(e) {
             case 'setSecurity': return ok(handleSetSecurity(requireAdmin(session), payload));
             case 'getClassColors': return ok(handleGetClassColors(session));
             case 'setClassColor': return ok(handleSetClassColor(requireAuth(session), payload));
+            case 'listRoutine': return ok(handleListRoutine(requireAuth(session)));
+            case 'saveRoutine': return ok(handleSaveRoutine(requireAuth(session), payload));
             case 'chatPoll': return ok(handleChatPoll(requireAuth(session)));
             case 'getThread': return ok(handleGetThread(requireAuth(session), payload));
             case 'sendMessage': return ok(handleSendMessage(requireAuth(session), payload));
@@ -60,6 +161,15 @@ function doPost(e) {
             case 'setPresenceMode': return ok(handleSetPresenceMode(requireStaff(session), payload));
             case 'setPublicKey': return ok(handleSetPublicKey(requireAuth(session), payload));
             case 'getPublicKey': return ok(handleGetPublicKey(requireAuth(session), payload));
+            case 'unsendMessage': return ok(handleUnsendMessage(requireAuth(session), payload));
+            case 'getSiteMaint': return ok(handleGetSiteMaint());
+            case 'setSiteMaint': return ok(handleSetSiteMaint(requireAdmin(session), payload));
+            case 'maintOff': return ok(handleMaintOff(payload));
+            case 'clearMessages': return ok(handleClearMessages(requireAdmin(session)));
+            case 'createShare': return ok(handleCreateShare(requireAuth(session), payload));
+            case 'getShared': return ok(handleGetShared(payload));
+            case 'listShares': return ok(handleListShares(requireStaff(session)));
+            case 'revokeShare': return ok(handleRevokeShare(requireStaff(session), payload));
             default: return fail('Unknown action.', 'BAD_REQUEST');
         }
     }
@@ -96,6 +206,56 @@ function handleSetMaintenance(session, p) {
         delete map[view];
     props().setProperty('MAINTENANCE', JSON.stringify(map));
     return { maintenance: map };
+}
+function handleGetSiteMaint() {
+    var raw = prop('SITE_MAINT', '{}');
+    var m;
+    try { m = JSON.parse(raw) || {}; } catch (e) { m = {}; }
+    return { on: !!m.on, message: String(m.message || ''), by: String(m.by || ''), ts: String(m.ts || '') };
+}
+function handleSetSiteMaint(session, p) {
+    var on = !!(p && p.on);
+    // Safety check: never let an admin lock the whole site if there is no
+    // passcode configured, or they would be unable to get back in.
+    if (on && !maintCode())
+        throw httpError('Set a maintenance passcode first. Add MAINT_CODE (or UNLOCK_CODE / REG_CODE) in Apps Script \u2192 Project Settings \u2192 Script Properties before turning maintenance on.', 'CONFIG');
+    var message = String(p && p.message || '').trim();
+    if (message.length > 500) message = message.slice(0, 500);
+    var m = { on: on, message: message, by: session.username, ts: new Date().toISOString() };
+    props().setProperty('SITE_MAINT', JSON.stringify(m));
+    return { on: m.on, message: m.message, by: m.by, ts: m.ts };
+}
+// Returns true when the whole site is in maintenance mode.
+function siteMaintOn() {
+    var raw = prop('SITE_MAINT', '{}');
+    try { return !!(JSON.parse(raw) || {}).on; } catch (e) { return false; }
+}
+// The secret maintenance passcode. Prefers MAINT_CODE, then falls back to the
+// existing UNLOCK_CODE / REG_CODE so you can reuse a code you already have.
+function maintCode() {
+    var c = prop('MAINT_CODE', '');
+    if (!c) c = prop('UNLOCK_CODE', '');
+    if (!c) c = prop('REG_CODE', '');
+    return c;
+}
+// Escape hatch: turn maintenance OFF with the passcode, WITHOUT a session.
+// This is what lets an admin back in while the force-block is active.
+function handleMaintOff(p) {
+    var code = String(p && p.code || '');
+    var expected = maintCode();
+    if (!expected)
+        throw httpError('No maintenance passcode is configured. An administrator must set MAINT_CODE (or UNLOCK_CODE / REG_CODE) in Script Properties.', 'CONFIG');
+    if (!constantTimeEquals(code, expected))
+        throw httpError('Incorrect maintenance passcode.', 'AUTH');
+    var m = { on: false, message: '', by: 'passcode', ts: new Date().toISOString() };
+    props().setProperty('SITE_MAINT', JSON.stringify(m));
+    return { on: false };
+}
+function handleClearMessages(session) {
+    var sh = messageSheet();
+    var last = sh.getLastRow();
+    if (last > 1) sh.getRange(2, 1, last - 1, sh.getLastColumn()).clearContent();
+    return { cleared: true };
 }
 var PROFILE_HEADERS = ['username', 'name', 'role', 'notes', 'photo', 'updatedAt'];
 function profileSheet() { return sheetOrCreate('Profiles', PROFILE_HEADERS); }
@@ -239,6 +399,52 @@ function handleSetClassColor(session, p) {
         sh.appendRow([key, color, session.username || '', now]);
     return { key: key, color: color };
 }
+var ROUTINE_HEADERS = ['lrn', 'status', 'date', 'notes', 'dropout', 'updatedBy', 'updatedAt'];
+function routineSheet() { return sheetOrCreate('RoutineInterviews', ROUTINE_HEADERS); }
+function riDateStr(v) {
+    if (v instanceof Date)
+        return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    var s = String(v == null ? '' : v).trim();
+    if (s.charAt(0) === "'") s = s.slice(1);
+    return s;
+}
+function handleListRoutine(session) {
+    var sh = routineSheet();
+    var values = sh.getDataRange().getValues();
+    var map = {};
+    for (var r = 1; r < values.length; r++) {
+        var lrn = String(values[r][0] || '').trim();
+        if (!lrn) continue;
+        map[lrn] = {
+            status: String(values[r][1] || 'Pending').trim() || 'Pending',
+            date: riDateStr(values[r][2]),
+            notes: String(values[r][3] == null ? '' : values[r][3]),
+            dropout: values[r][4] === true || String(values[r][4]).toLowerCase() === 'true' || String(values[r][4]).toLowerCase() === 'yes'
+        };
+    }
+    return { records: map };
+}
+function handleSaveRoutine(session, p) {
+    var lrn = String(p && p.lrn || '').trim().slice(0, 40);
+    if (!lrn)
+        throw httpError('A student is required.', 'BAD_REQUEST');
+    var status = String(p && p.status || 'Pending').trim();
+    if (['Pending', 'Scheduled', 'Done'].indexOf(status) === -1) status = 'Pending';
+    var date = String(p && p.date || '').trim().slice(0, 20);
+    var notes = String((p && p.notes) == null ? '' : p.notes).slice(0, 2000);
+    var dropout = (p && p.dropout) === true;
+    var sh = routineSheet();
+    var values = sh.getDataRange().getValues();
+    var now = new Date().toISOString();
+    for (var r = 1; r < values.length; r++) {
+        if (String(values[r][0] || '').trim() === lrn) {
+            sh.getRange(r + 1, 2, 1, 6).setValues([[status, date, notes, dropout, session.username || '', now]]);
+            return { lrn: lrn, status: status, date: date, notes: notes, dropout: dropout };
+        }
+    }
+    sh.appendRow([lrn, status, date, notes, dropout, session.username || '', now]);
+    return { lrn: lrn, status: status, date: date, notes: notes, dropout: dropout };
+}
 var PRESENCE_HEADERS = ['username', 'lastSeen'];
 var MESSAGE_HEADERS = ['id', 'from', 'to', 'text', 'ts', 'readAt', 'kind'];
 function presenceSheet() { return sheetOrCreate('Presence', PRESENCE_HEADERS); }
@@ -280,6 +486,7 @@ function readPresence() {
 function handleChatPoll(session) {
     var me = session.username;
     touchPresence(me);
+    var meIsStaff = isStaffRole(session.role);
     var users = readUsers();
     var pres = readPresence();
     var flags = readChatFlags();
@@ -290,6 +497,7 @@ function handleChatPoll(session) {
     for (var i = 0; i < users.length; i++) {
         var u = users[i];
         if (String(u.username).toLowerCase() === String(me).toLowerCase()) continue;
+        if (!meIsStaff && isStaffRole(u.role)) continue;
         var unread = 0, lastTs = '', lastText = '';
         for (var r = 1; r < msgs.length; r++) {
             var f = String(msgs[r][1] || ''), t = String(msgs[r][2] || '');
@@ -310,9 +518,18 @@ function handleChatPoll(session) {
         contacts.push({ username: u.username, name: u.name, role: u.role, online: !!online, lastSeen: lastSeenIso, unread: unread, lastTs: lastTs, lastText: lastText, muted: !!fl.muted });
     }
     contacts.sort(function (a, b) { return String(b.lastTs || '').localeCompare(String(a.lastTs || '')); });
+    var ann = null;
+    for (var ar = 1; ar < msgs.length; ar++) {
+        if (String(msgs[ar][2] || '') === me && String(msgs[ar][6] || '') === 'announcement') {
+            var atext = String(msgs[ar][3] || '');
+            if (!atext) continue;
+            var ats = String(msgs[ar][4] || '');
+            if (!ann || ats > ann.ts) ann = { id: String(msgs[ar][0] || ''), from: String(msgs[ar][1] || ''), text: atext, ts: ats };
+        }
+    }
     var myFlags = flags[String(me).toLowerCase()] || {};
     var myMode = myFlags.mode || (isStaffRole(session.role) ? 'invisible' : 'normal');
-    return { me: me, myRole: session.role, myName: session.name || me, myMode: myMode, contacts: contacts, totalUnread: totalUnread };
+    return { me: me, myRole: session.role, myName: session.name || me, myMode: myMode, contacts: contacts, totalUnread: totalUnread, announcement: ann };
 }
 function handleGetThread(session, p) {
     var me = session.username;
@@ -411,16 +628,24 @@ function handleChatBroadcast(session, p) {
     var text = String(p && p.text || '').trim();
     if (!text) throw httpError('Announcement cannot be empty.', 'BAD_REQUEST');
     if (text.length > 2000) text = text.slice(0, 2000);
-    var users = readUsers();
+    var to = String(p && p.to || '').trim();
     var sh = messageSheet();
     var now = new Date().toISOString();
     var base = Date.now();
     var sent = 0;
-    for (var i = 0; i < users.length; i++) {
-        var u = users[i];
-        if (String(u.username).toLowerCase() === String(me).toLowerCase()) continue;
-        sh.appendRow(['a' + base + '_' + i, me, u.username, text, now, '', 'announcement']);
-        sent++;
+    if (to) {
+        var target = findUser(to);
+        if (!target) throw httpError('That person could not be found.', 'NOT_FOUND');
+        sh.appendRow(['a' + base + '_0', me, target.username, text, now, '', 'announcement']);
+        sent = 1;
+    } else {
+        var users = readUsers();
+        for (var i = 0; i < users.length; i++) {
+            var u = users[i];
+            if (String(u.username).toLowerCase() === String(me).toLowerCase()) continue;
+            sh.appendRow(['a' + base + '_' + i, me, u.username, text, now, '', 'announcement']);
+            sent++;
+        }
     }
     return { sent: sent };
 }
@@ -431,6 +656,22 @@ function handleDeleteMessage(session, p) {
     var vals = sh.getDataRange().getValues();
     for (var r = 1; r < vals.length; r++) {
         if (String(vals[r][0] || '') === id) {
+            sh.getRange(r + 1, 4).setValue('');
+            sh.getRange(r + 1, 7).setValue('removed');
+            return { ok: true, id: id };
+        }
+    }
+    throw httpError('Message not found.', 'NOT_FOUND');
+}
+function handleUnsendMessage(session, p) {
+    var id = String(p && p.id || '').trim();
+    if (!id) throw httpError('Message id required.', 'BAD_REQUEST');
+    var me = String(session.username || '').toLowerCase();
+    var sh = messageSheet();
+    var vals = sh.getDataRange().getValues();
+    for (var r = 1; r < vals.length; r++) {
+        if (String(vals[r][0] || '') === id) {
+            if (String(vals[r][1] || '').toLowerCase() !== me) throw httpError('You can only unsend your own messages.', 'FORBIDDEN');
             sh.getRange(r + 1, 4).setValue('');
             sh.getRange(r + 1, 7).setValue('removed');
             return { ok: true, id: id };
@@ -514,7 +755,8 @@ function doGet() {
     return ContentService.createTextOutput('SMC Guidance API is running.')
         .setMimeType(ContentService.MimeType.TEXT);
 }
-function ok(data) { return json({ ok: true, data: data }); }
+var __renewToken = null;
+function ok(data) { return json({ ok: true, data: data, token: __renewToken || undefined }); }
 function fail(msg, code) { return json({ ok: false, error: msg, code: code || 'ERROR' }); }
 function json(obj) {
     return ContentService.createTextOutput(JSON.stringify(obj))
@@ -538,11 +780,31 @@ function toHex(bytes) {
 function hmacHex(message, key) {
     return toHex(Utilities.computeHmacSha256Signature(message, key));
 }
+// Cryptographic-strength random hex WITHOUT relying on Math.random().
+// Apps Script has no crypto.getRandomValues, so we mix several platform UUIDs
+// (type-4, randomly generated) through a keyed HMAC. Suitable for salts,
+// session/share tokens, and 2FA codes.
+function secureRandomHex(nBytes) {
+    nBytes = nBytes || 24;
+    var seed = '';
+    for (var i = 0; i < 6; i++)
+        seed += Utilities.getUuid() + ':';
+    var key = prop('SESSION_SECRET', 'smc-fallback-key') + ':' + Utilities.getUuid();
+    var out = '';
+    var counter = 0;
+    while (out.length < nBytes * 2) {
+        out += hmacHex(seed + counter, key);
+        counter++;
+    }
+    return out.slice(0, nBytes * 2);
+}
 function randomToken(len) {
-    var bytes = [];
-    for (var i = 0; i < (len || 24); i++)
-        bytes.push(Math.floor(Math.random() * 256));
-    return hmacHex(Utilities.getUuid() + ':' + bytes.join(','), prop('SESSION_SECRET', 'x')).slice(0, (len || 24) * 2);
+    return secureRandomHex(len || 24);
+}
+// Unpredictable 6-digit code for 2FA (no Math.random()).
+function secureCode6() {
+    var n = parseInt(secureRandomHex(4).slice(0, 8), 16);
+    return String(100000 + (n % 900000));
 }
 function hashPassword(password, salt) {
     var pepper = prop('PEPPER', '');
@@ -617,7 +879,7 @@ function readUsers() {
         return [];
     var head = values[0].map(function (h) { return String(h).trim().toLowerCase(); });
     var col = function (name) { return head.indexOf(name); };
-    var iU = col('username'), iN = col('name'), iR = col('role'), iS = col('salt'), iH = col('hash'), iD = col('designate');
+    var iU = col('username'), iN = col('name'), iR = col('role'), iS = col('salt'), iH = col('hash'), iD = col('designate'), iE = col('email');
     var out = [];
     for (var r = 1; r < values.length; r++) {
         var row = values[r];
@@ -630,10 +892,52 @@ function readUsers() {
             role: iR >= 0 ? String(row[iR]).trim() : 'counselor',
             salt: iS >= 0 ? String(row[iS]) : '',
             hash: iH >= 0 ? String(row[iH]) : '',
-            designate: iD >= 0 ? String(row[iD]).trim() : ''
+            designate: iD >= 0 ? String(row[iD]).trim() : '',
+            email: iE >= 0 ? String(row[iE]).trim() : ''
         });
     }
     return out;
+}
+// Exact, normalized matching against a delimited list of names/usernames.
+// Replaces loose substring matching (indexOf), which could leak rows across
+// people with overlapping names (e.g. "Ann" inside "Joanna"). The field may
+// hold several designates separated by comma, semicolon, slash, pipe, or newline.
+// Normalize a name for tolerant matching: lowercases, strips common titles
+// (Mr/Mrs/Ms/Dr/etc.), turns punctuation into spaces, and collapses spaces.
+function normalizeName(s) {
+    s = String(s || '').toLowerCase();
+    s = s.replace(/[.,;\/|_\-]+/g, ' ');
+    s = s.replace(/\b(mr|mrs|ms|miss|sir|madam|maam|ma am|dr|prof|professor|teacher|engr|atty|rev|fr)\b/g, ' ');
+    s = s.replace(/\s+/g, ' ').trim();
+    return s;
+}
+// Tolerant matcher used for per-counselor record/evaluation/report visibility.
+// A key matches a field entry when either the whole normalized strings are
+// equal, OR every word of the key's full name appears in that entry (so
+// "Ms. Jane A. Cruz" still matches the user "Jane Cruz"). Single-word keys
+// (e.g. a username) must match a whole entry exactly to avoid over-sharing.
+function fieldMatchesAny(fieldValue, keys) {
+    var parts = String(fieldValue || '')
+        .split(/[,;\/|\n]+/)
+        .map(function (s) { return normalizeName(s); })
+        .filter(function (s) { return s; });
+    if (!parts.length)
+        return false;
+    return keys.some(function (k) {
+        var nk = normalizeName(k);
+        if (!nk)
+            return false;
+        if (parts.indexOf(nk) !== -1)
+            return true;
+        var kt = nk.split(' ').filter(function (t) { return t.length > 1; });
+        if (kt.length >= 2) {
+            return parts.some(function (part) {
+                var pset = part.split(' ');
+                return kt.every(function (t) { return pset.indexOf(t) !== -1; });
+            });
+        }
+        return false;
+    });
 }
 function findUser(username) {
     username = String(username || '').trim().toLowerCase();
@@ -660,10 +964,176 @@ function handleLogin(p) {
         throw httpError('Incorrect username or password. ' + left + ' attempt' + (left === 1 ? '' : 's') + ' left before the site locks.', 'AUTH');
     }
     props().setProperty('LOGIN_FAILS', '0');
+    var deviceId = String(p.deviceId || '').trim();
+    if (deviceId && isTrustedDevice(u.username, deviceId))
+        return issueSession(u);
+    if (!u.email)
+        return { twofa: 'email_required' };
+    sendTwoFactorCode(u, deviceId);
+    return { twofa: 'code_sent', emailMasked: maskEmail(u.email) };
+}
+function issueSession(u) {
     var safe = { username: u.username, name: u.name, role: u.role };
     var token = makeToken(safe);
     safe.expiresAt = verifyToken(token).expiresAt;
     return { token: token, user: safe };
+}
+function readTrustedDevices(username) {
+    var raw = prop('DEV_' + String(username).toLowerCase(), '');
+    if (!raw)
+        return [];
+    try {
+        var a = JSON.parse(raw);
+        return (a && a.length) ? a : [];
+    }
+    catch (e) {
+        return [];
+    }
+}
+function isTrustedDevice(username, deviceId) {
+    if (!deviceId)
+        return false;
+    return readTrustedDevices(username).indexOf(deviceId) !== -1;
+}
+function trustDevice(username, deviceId) {
+    if (!deviceId)
+        return;
+    var list = readTrustedDevices(username);
+    if (list.indexOf(deviceId) === -1)
+        list.push(deviceId);
+    while (list.length > 20)
+        list.shift();
+    props().setProperty('DEV_' + String(username).toLowerCase(), JSON.stringify(list));
+}
+function maskEmail(e) {
+    e = String(e || '');
+    var at = e.indexOf('@');
+    if (at < 1)
+        return e;
+    var name = e.slice(0, at), dom = e.slice(at);
+    return name.charAt(0) + (name.length > 2 ? '***' : '*') + dom;
+}
+function sendTwoFactorCode(u, deviceId) {
+    var code = secureCode6();
+    var rec = {
+        h: hmacHex(code, prop('SESSION_SECRET', 'x')),
+        exp: Date.now() + 10 * 60 * 1000,
+        dev: String(deviceId || ''),
+        tries: 0
+    };
+    props().setProperty('TFA_' + u.username.toLowerCase(), JSON.stringify(rec));
+    var subject = 'Your SMC Guidance sign-in code';
+    var body = 'Your SMC Guidance verification code is ' + code + '. It expires in 10 minutes. If you did not try to sign in, you can ignore this email.\n\nThis is an automated message. Please do not reply.';
+    sendAppEmail(u.email, subject, body);
+}
+// Central mailer for all app emails (2FA codes, auth test).
+// - MAIL_FROM      : optional "Send mail as" alias to send FROM (hides your
+//                    personal Gmail). Only used if it is a verified alias.
+// - MAIL_FROM_NAME : display name (default "SMC Guidance (no-reply)").
+// - MAIL_REPLY_TO  : optional reply-to address.
+function sendAppEmail(to, subject, body) {
+    var fromName = prop('MAIL_FROM_NAME', 'SMC Guidance (no-reply)');
+    var fromAlias = prop('MAIL_FROM', '');
+    var replyTo = prop('MAIL_REPLY_TO', '');
+    // Preferred path: GmailApp can send FROM a verified alias (MailApp cannot),
+    // so the recipient never sees the personal address running the script.
+    if (fromAlias) {
+        var aliases = [];
+        try { aliases = GmailApp.getAliases(); } catch (e) { aliases = []; }
+        if (aliases.indexOf(fromAlias) !== -1) {
+            var gOpts = { from: fromAlias, name: fromName };
+            if (replyTo) gOpts.replyTo = replyTo;
+            GmailApp.sendEmail(to, subject, body, gOpts);
+            return;
+        }
+    }
+    // Fallback: MailApp (sends from the script owner's address). noReply becomes
+    // a true no-reply on Google Workspace; on consumer Gmail only the name shows.
+    var options = { name: fromName, noReply: true };
+    if (replyTo) { options.replyTo = replyTo; options.noReply = false; }
+    MailApp.sendEmail(to, subject, body, options);
+}
+function handleVerify2fa(p) {
+    if (secIsLocked())
+        throw httpError('The website is locked due to suspicious activity. An administrator must unlock it with the unlock code.', 'LOCKED');
+    var u = findUser(p.username);
+    var candidate = hashPassword(String(p.password || ''), u ? u.salt : 'nosalt');
+    if (!u || !constantTimeEquals(candidate, u.hash))
+        throw httpError('Incorrect username or password.', 'AUTH');
+    var key = 'TFA_' + u.username.toLowerCase();
+    var raw = prop(key, '');
+    if (!raw)
+        throw httpError('No verification in progress. Please sign in again.', 'AUTH');
+    var rec;
+    try {
+        rec = JSON.parse(raw);
+    }
+    catch (e) {
+        props().deleteProperty(key);
+        throw httpError('Please sign in again.', 'AUTH');
+    }
+    if (!rec || Date.now() > rec.exp) {
+        props().deleteProperty(key);
+        throw httpError('That code has expired. Please request a new one.', 'AUTH');
+    }
+    if ((rec.tries || 0) >= 5) {
+        props().deleteProperty(key);
+        throw httpError('Too many incorrect codes. Please sign in again.', 'AUTH');
+    }
+    var code = String(p.code || '').trim();
+    if (!constantTimeEquals(hmacHex(code, prop('SESSION_SECRET', 'x')), rec.h)) {
+        rec.tries = (rec.tries || 0) + 1;
+        props().setProperty(key, JSON.stringify(rec));
+        throw httpError('Incorrect code. Please try again.', 'AUTH');
+    }
+    props().deleteProperty(key);
+    var deviceId = String(p.deviceId || '').trim();
+    if (p.remember && deviceId)
+        trustDevice(u.username, deviceId);
+    return issueSession(u);
+}
+function handleSet2faEmail(p) {
+    if (secIsLocked())
+        throw httpError('The website is locked due to suspicious activity. An administrator must unlock it with the unlock code.', 'LOCKED');
+    var u = findUser(p.username);
+    var candidate = hashPassword(String(p.password || ''), u ? u.salt : 'nosalt');
+    if (!u || !constantTimeEquals(candidate, u.hash))
+        throw httpError('Incorrect username or password.', 'AUTH');
+    var email = String(p.email || '').trim();
+    if (!email || email.indexOf('@') < 1 || email.indexOf('.') === -1)
+        throw httpError('Please enter a valid email address.', 'BAD_REQUEST');
+    setUserEmail(u.username, email);
+    u.email = email;
+    sendTwoFactorCode(u, String(p.deviceId || ''));
+    return { twofa: 'code_sent', emailMasked: maskEmail(email) };
+}
+function handleResend2fa(p) {
+    var u = findUser(p.username);
+    var candidate = hashPassword(String(p.password || ''), u ? u.salt : 'nosalt');
+    if (!u || !constantTimeEquals(candidate, u.hash))
+        throw httpError('Incorrect username or password.', 'AUTH');
+    if (!u.email)
+        throw httpError('No email address on file.', 'BAD_REQUEST');
+    sendTwoFactorCode(u, String(p.deviceId || ''));
+    return { twofa: 'code_sent', emailMasked: maskEmail(u.email) };
+}
+function setUserEmail(username, email) {
+    var sh = sheet('Users');
+    var values = sh.getDataRange().getValues();
+    var head = values[0].map(function (h) { return String(h).trim().toLowerCase(); });
+    var iEmail = head.indexOf('email');
+    if (iEmail === -1) {
+        iEmail = head.length;
+        sh.getRange(1, iEmail + 1).setValue('email');
+    }
+    var iU = head.indexOf('username');
+    var uname = String(username).trim().toLowerCase();
+    for (var r = 1; r < values.length; r++) {
+        if (String(values[r][iU]).trim().toLowerCase() === uname) {
+            sh.getRange(r + 1, iEmail + 1).setValue(email);
+            return;
+        }
+    }
 }
 function handleRegister(p) {
     var name = String(p.name || '').trim();
@@ -681,12 +1151,61 @@ function handleRegister(p) {
         throw httpError('Invalid registration code.', 'AUTH');
     if (findUser(username))
         throw httpError('That username is already taken.', 'CONFLICT');
+    var email = String(p.email || '').trim();
+    if (!email || email.indexOf('@') < 1 || email.indexOf('.') === -1)
+        throw httpError('Please enter a valid email address.', 'BAD_REQUEST');
     var salt = randomToken(16);
     var hash = hashPassword(password, salt);
     var sh = sheet('Users');
     sh.appendRow([username, name, 'counselor', salt, hash, '']);
+    setUserEmail(username, email);
     return { created: true };
 }
+function autoNumberRecords(sh, rows) {
+    if (!rows || !rows.length)
+        return;
+    var recCol = FIELD_MAP.recordNo + 1;   // 1-based sheet column for Record No.
+    var sesCol = FIELD_MAP.sessionNo + 1;   // 1-based sheet column for Session No.
+    // Number rows by the session DATE (earliest first), tie-broken by sheet row.
+    // Record No. is the overall chronological position; Session No. is the
+    // per-student visit count in date order.
+    var order = rows.slice().sort(function (a, b) {
+        var da = Date.parse(a.date) || 0, db = Date.parse(b.date) || 0;
+        if (da !== db) return da - db;
+        return (a.__row || 0) - (b.__row || 0);
+    });
+    var writes = [];
+    var recCounter = 0;
+    var perStudent = {};
+    order.forEach(function (o) {
+        recCounter++;
+        var key = normalizeName(o.name);
+        perStudent[key] = (perStudent[key] || 0) + 1;
+        // Always (re)assign from date order so the numbers self-correct whenever
+        // rows are added or session dates change. Only write cells that actually
+        // changed, to avoid needless sheet updates.
+        var recVal = String(recCounter);
+        if (String(o.recordNo == null ? '' : o.recordNo).trim() !== recVal)
+            writes.push({ row: o.__row, col: recCol, val: recCounter });
+        o.recordNo = recVal;
+        var sesVal = String(perStudent[key]);
+        if (String(o.sessionNo == null ? '' : o.sessionNo).trim() !== sesVal)
+            writes.push({ row: o.__row, col: sesCol, val: perStudent[key] });
+        o.sessionNo = sesVal;
+    });
+    // Persist newly assigned numbers. Best-effort: never let a write failure
+    // block the dashboard from loading records.
+    if (writes.length) {
+        try {
+            writes.forEach(function (w) {
+                if (w.row) sh.getRange(w.row, w.col).setValue(w.val);
+            });
+        } catch (e) {
+            Logger.log('autoNumberRecords: could not write numbers - ' + e.message);
+        }
+    }
+}
+
 function handleRecords(session) {
     var sh = sheet('Records');
     var values = sh.getDataRange().getValues();
@@ -702,16 +1221,21 @@ function handleRecords(session) {
             var v = raw[FIELD_MAP[k]];
             obj[k] = (v == null) ? '' : (v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(v));
         });
+        obj.__row = r + 1; // 1-based sheet row, used for auto-numbering
         rows.push(obj);
     }
+    // Auto-generate Record No. (overall sequential) and Session No. (per-student
+    // visit count) for any blank cells, and persist them back to the sheet so
+    // staff no longer have to fill these in by hand.
+    autoNumberRecords(sh, rows);
+    rows.forEach(function (o) { delete o.__row; });
     if (session.role !== 'admin') {
         var me = findUser(session.username) || {};
         var keys = [String(session.name || '').toLowerCase(), String(session.username || '').toLowerCase()];
         if (me.designate)
             keys.push(me.designate.toLowerCase());
         rows = rows.filter(function (o) {
-            var d = String(o.designate || '').toLowerCase();
-            return keys.some(function (k) { return k && d.indexOf(k) !== -1; });
+            return fieldMatchesAny(o.designate, keys);
         });
     }
     return rows;
@@ -804,8 +1328,7 @@ function evalCell(row, idx) {
 }
 function involvesMe(session, assignedTo, checkedBy) {
     var me = [String(session.name || '').toLowerCase(), String(session.username || '').toLowerCase()];
-    var aT = String(assignedTo || '').toLowerCase(), cB = String(checkedBy || '').toLowerCase();
-    return me.some(function (k) { return k && (aT.indexOf(k) !== -1 || cB.indexOf(k) !== -1); });
+    return fieldMatchesAny(assignedTo, me) || fieldMatchesAny(checkedBy, me);
 }
 function handleListEvaluations(session) {
     var sh = sheetOrCreate('Evaluations', EVAL_HEADERS);
@@ -1548,9 +2071,8 @@ function incToObj(row, c) {
     };
 }
 function incMine(session, reportedBy) {
-    var rb = String(reportedBy || '').toLowerCase();
     var keys = [String(session.name || '').toLowerCase(), String(session.username || '').toLowerCase()];
-    return keys.some(function (k) { return k && rb.indexOf(k) !== -1; });
+    return fieldMatchesAny(reportedBy, keys);
 }
 function handleListIncidents(session) {
     var sh = incidentSheet();
@@ -1609,4 +2131,120 @@ function handleDeleteIncident(session, p) {
     var c = incidentCols(values);
     for (var r = 1; r < values.length; r++) { if (String(values[r][c.id]).trim() === id) { sh.deleteRow(r + 1); return { removed: true }; } }
     throw httpError('Incident not found.', 'NOT_FOUND');
+}
+
+var SHARE_HEADERS = ['token','type','title','bodyClass','full','html','createdBy','createdAt','expiresAt','revoked'];
+// Server-side sanitizer for PUBLIC share pages. Share links are viewable
+// WITHOUT logging in, so we must not trust the HTML the browser sends. This
+// strips the common stored-XSS vectors: <script>/<style>/<iframe>/<object>/
+// <embed>/<template>/<noscript> blocks, standalone <link>/<meta>/<base>/<form>
+// tags, inline on* event handlers, and javascript:/vbscript:/non-image data:
+// URLs. Regex sanitizing is not a full HTML parser, so keep shared content
+// limited to the app's own formatted output.
+function sanitizeShareHtml(html) {
+    var s = String(html || '');
+    s = s.replace(/<\s*(script|style|iframe|object|embed|template|noscript)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '');
+    s = s.replace(/<\s*(script|iframe|object|embed|link|meta|base|form)\b[^>]*>/gi, '');
+    s = s.replace(/\son[a-z0-9_-]+\s*=\s*"[^"]*"/gi, '');
+    s = s.replace(/\son[a-z0-9_-]+\s*=\s*'[^']*'/gi, '');
+    s = s.replace(/\son[a-z0-9_-]+\s*=\s*[^\s>]+/gi, '');
+    s = s.replace(/(href|src|xlink:href)\s*=\s*"(\s*(?:javascript|vbscript)\s*:)[^"]*"/gi, '$1="#"');
+    s = s.replace(/(href|src|xlink:href)\s*=\s*'(\s*(?:javascript|vbscript)\s*:)[^']*'/gi, "$1='#'");
+    s = s.replace(/(href|src|xlink:href)\s*=\s*"(\s*data:(?!image\/)[^"]*)"/gi, '$1="#"');
+    s = s.replace(/(href|src|xlink:href)\s*=\s*'(\s*data:(?!image\/)[^']*)'/gi, "$1='#'");
+    return s;
+}
+function shareSheet(){ return sheetOrCreate('Shares', SHARE_HEADERS); }
+function shareCols(values){
+    var head = values[0].map(function(h){ return String(h).trim().toLowerCase(); });
+    return { token: head.indexOf('token'), type: head.indexOf('type'), title: head.indexOf('title'), bodyClass: head.indexOf('bodyclass'), full: head.indexOf('full'), html: head.indexOf('html'), createdBy: head.indexOf('createdby'), createdAt: head.indexOf('createdat'), expiresAt: head.indexOf('expiresat'), revoked: head.indexOf('revoked') };
+}
+function handleCreateShare(session, p){
+    var type = String(p.type || '').trim();
+    var allowed = { record:1, incident:1, classlist:1, evaluation:1 };
+    if(!allowed[type]) throw httpError('Unknown document type.', 'BAD_REQUEST');
+    var html = String(p.html || '');
+    if(!html.trim()) throw httpError('Nothing to share.', 'BAD_REQUEST');
+    if(html.length > 48000) throw httpError('This document is too large to share as a link. Print it to PDF instead.', 'TOO_LARGE');
+    html = sanitizeShareHtml(html);
+    var sh = shareSheet();
+    var values = sh.getDataRange().getValues();
+    var c = shareCols(values);
+    var width = values[0].length;
+    var now = new Date();
+    var days = parseInt(prop('SHARE_TTL_DAYS','7'), 10) || 7;
+    var exp = new Date(now.getTime() + days * 86400000);
+    var token = randomToken(20);
+    var row = [];
+    for(var i=0;i<width;i++) row[i] = '';
+    function setC(idx,val){ if(idx>=0) row[idx] = val==null ? '' : val; }
+    setC(c.token, token);
+    setC(c.type, type);
+    setC(c.title, String(p.title||'').slice(0,200));
+    setC(c.bodyClass, String(p.bodyClass||'').slice(0,60));
+    setC(c.full, p.full ? 'yes' : '');
+    setC(c.html, html);
+    setC(c.createdBy, session.name || session.username);
+    setC(c.createdAt, Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'));
+    setC(c.expiresAt, exp.toISOString());
+    setC(c.revoked, '');
+    sh.appendRow(row);
+    return { token: token, expiresAt: exp.toISOString() };
+}
+function handleGetShared(p){
+    var token = String(p.token||'').trim();
+    if(!token) throw httpError('This link is invalid.', 'NOT_FOUND');
+    var sh = shareSheet();
+    var values = sh.getDataRange().getValues();
+    var c = shareCols(values);
+    for(var r=1;r<values.length;r++){
+        if(String(values[r][c.token]).trim() === token){
+            var row = values[r];
+            if(String(row[c.revoked]).trim()) throw httpError('This link has been revoked.', 'GONE');
+            var expStr = String(row[c.expiresAt]).trim();
+            var exp = expStr ? new Date(expStr) : null;
+            if(exp && !isNaN(exp.getTime()) && exp.getTime() < Date.now()) throw httpError('This link has expired.', 'GONE');
+            return { type: String(row[c.type]||''), title: String(row[c.title]||''), bodyClass: String(row[c.bodyClass]||''), full: !!String(row[c.full]).trim(), html: String(row[c.html]||''), expiresAt: expStr };
+        }
+    }
+    throw httpError('This link is invalid or has been removed.', 'NOT_FOUND');
+}
+function handleListShares(session){
+    var sh = shareSheet();
+    var values = sh.getDataRange().getValues();
+    if(values.length < 2) return [];
+    var c = shareCols(values);
+    var out = [];
+    var now = Date.now();
+    for(var r=1;r<values.length;r++){
+        var row = values[r];
+        var tok = String(row[c.token]||'').trim();
+        if(!tok) continue;
+        var expStr = String(row[c.expiresAt]||'').trim();
+        var exp = expStr ? new Date(expStr) : null;
+        var expired = exp && !isNaN(exp.getTime()) && exp.getTime() < now;
+        out.push({ token: tok, type: String(row[c.type]||''), title: String(row[c.title]||''), createdBy: String(row[c.createdBy]||''), createdAt: String(row[c.createdAt]||''), expiresAt: expStr, revoked: !!String(row[c.revoked]).trim(), expired: !!expired });
+    }
+    out.sort(function(a,b){ return (a.createdAt < b.createdAt) ? 1 : -1; });
+    return out;
+}
+function handleRevokeShare(session, p){
+    var token = String(p.token||'').trim();
+    if(!token) throw httpError('Link id required.', 'BAD_REQUEST');
+    var sh = shareSheet();
+    var values = sh.getDataRange().getValues();
+    var c = shareCols(values);
+    for(var r=1;r<values.length;r++){
+        if(String(values[r][c.token]).trim() === token){
+            if(c.revoked>=0) sh.getRange(r+1, c.revoked+1).setValue('yes');
+            return { revoked: true };
+        }
+    }
+    throw httpError('Link not found.', 'NOT_FOUND');
+}
+
+function authorizeNow() {
+  var to = Session.getEffectiveUser().getEmail();
+  sendAppEmail(to, 'SMC Guidance - email is now authorized', 'This confirms email sending is authorized. Two-factor codes can now be emailed. You may close this.');
+  return 'Test email sent to ' + to;
 }
