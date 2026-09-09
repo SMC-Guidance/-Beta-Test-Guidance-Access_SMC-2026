@@ -1410,3 +1410,131 @@ function handleDiagnoseEvalFolder(session) {
         capped: rows.length >= 400 || !!ctx.stopped
     };
 }
+
+// ---------------------------------------------------------------------------
+// Run-in-the-editor diagnostics
+//
+// "Failed to fetch" is a browser-level error: the request never came back.
+// The website cannot tell you anything useful in that case. These functions
+// run directly inside the Apps Script editor, so they bypass the web app,
+// the deployment, and the network completely. Whatever is really wrong shows
+// up in the execution log.
+//
+// How to run: open the Apps Script editor, pick the function name from the
+// dropdown at the top, press Run, then read the log at the bottom.
+// ---------------------------------------------------------------------------
+
+/**
+ * Prints the full folder report to the log. Same work the Diagnose button
+ * does, minus the web app.
+ */
+function testDiagnoseFolder() {
+    var t0 = Date.now();
+    var out = [];
+
+    out.push('=== Folder diagnosis ===');
+
+    var folderId = prop('FORMS_FOLDER_ID', '');
+    out.push('FORMS_FOLDER_ID  : ' + (folderId || '(NOT SET)'));
+    if (!folderId) {
+        out.push('');
+        out.push('STOP: FORMS_FOLDER_ID is not set.');
+        out.push('Project Settings > Script Properties > add FORMS_FOLDER_ID = the folder id.');
+        Logger.log(out.join('\n'));
+        return out.join('\n');
+    }
+
+    var root;
+    try {
+        root = formsFolder();
+        out.push('Folder name      : ' + root.getName());
+        out.push('Folder URL       : ' + root.getUrl());
+    } catch (e) {
+        out.push('');
+        out.push('STOP: cannot open that folder: ' + (e.message || e));
+        out.push('Either the id is wrong, or this Google account cannot see the folder.');
+        out.push('Signed in as: ' + evalWhoAmI());
+        Logger.log(out.join('\n'));
+        return out.join('\n');
+    }
+
+    out.push('Running as       : ' + evalWhoAmI());
+    out.push('Template id      : ' + (prop('EVAL_TEMPLATE_ID', '') || '(NOT SET - Build will fail)'));
+    out.push('');
+
+    var res;
+    try {
+        res = handleDiagnoseEvalFolder(null);
+    } catch (e) {
+        out.push('The scan itself threw an error: ' + (e.message || e));
+        out.push((e.stack || '').split('\n').slice(0, 5).join('\n'));
+        Logger.log(out.join('\n'));
+        return out.join('\n');
+    }
+
+    var c = res.counts || {};
+    out.push('Readable files   : ' + (c.usable || 0));
+    out.push('Skipped files    : ' + (c.skipped || 0));
+    out.push('Subfolders       : ' + (c.folders || 0));
+    out.push('Folder shortcuts : ' + (c.shortcutFolders || 0));
+    out.push('Shortcut loops   : ' + (c.loops || 0));
+    out.push('Scan time        : ' + ((res.elapsedMs || 0) / 1000).toFixed(1) + 's');
+    if (res.stopped) out.push('CUT SHORT        : ' + res.stopped);
+    out.push('');
+
+    var rows = res.entries || [];
+    if (!rows.length) {
+        out.push('No files at all were visible inside that folder.');
+        out.push('Check that the folder is shared with ' + evalWhoAmI() + '.');
+    } else {
+        out.push('--- entries ---');
+        for (var i = 0; i < rows.length && i < 100; i++) {
+            var r = rows[i];
+            out.push((r.usable ? 'USE  ' : 'SKIP ') +
+                (r.path ? '[' + r.path + '] ' : '[root] ') +
+                r.name + '   (' + r.mime + ')');
+        }
+        if (rows.length > 100) out.push('... and ' + (rows.length - 100) + ' more');
+    }
+
+    out.push('');
+    out.push('Total time: ' + ((Date.now() - t0) / 1000).toFixed(1) + 's');
+
+    var text = out.join('\n');
+    Logger.log(text);
+    return text;
+}
+
+/** Which Google account this script actually runs as. */
+function evalWhoAmI() {
+    try {
+        var who = Session.getEffectiveUser().getEmail();
+        return who || '(unknown - no email permission)';
+    } catch (e) {
+        return '(unknown)';
+    }
+}
+
+/**
+ * Confirms the three eval actions are wired into doPost. If any say MISSING,
+ * that is why the website reports an unknown action.
+ */
+function testEvalWiring() {
+    var out = ['=== Wiring check ==='];
+    var names = ['handleListEvalBatches', 'handleBuildEvalWorkbooks', 'handleDiagnoseEvalFolder'];
+
+    var g = (typeof globalThis !== 'undefined') ? globalThis : this;
+    for (var i = 0; i < names.length; i++) {
+        var fn = g[names[i]];
+        out.push((typeof fn === 'function' ? 'OK      ' : 'MISSING ') + names[i]);
+    }
+
+    out.push('');
+    out.push('If all three say OK but the website still fails, the problem is the');
+    out.push('deployment, not the code. Deploy > Manage deployments > pencil >');
+    out.push('New version > Deploy. Also confirm "Who has access" is set to Anyone.');
+
+    var text = out.join('\n');
+    Logger.log(text);
+    return text;
+}
