@@ -1,0 +1,21 @@
+{
+  "name": "Stella Maris College \u2014 Guidance Center",
+  "short_name": "SMC Guidance",
+  "description": "Stella Maris College Guidance Center \u2014 student records, teacher evaluations, and counseling tools.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "id": "/smc-guidance/",
+  "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#0D1B2A",
+  "theme_color": "#002B6B",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["education", "productivity"],
+  "icons": [
+    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
