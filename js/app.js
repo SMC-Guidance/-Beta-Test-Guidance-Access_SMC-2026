@@ -11,11 +11,9 @@ SMC.app = (function () {
     var VIEW_META = {
         dashboard: { el: 'dashView', nav: 'navDash', title: 'Dashboard', sub: 'Stella Maris College \u00b7 Guidance Office' },
         counselors: { el: 'counselorsView', nav: 'navCounselors', title: 'Staff & Guidance Designates', sub: 'Manage accounts and access levels' },
-        evaluations: { el: 'evalView', nav: 'navEval', title: 'Teacher Evaluations', sub: 'Track evaluation tasks and cross-checking' },
+        evaluations: { el: 'evalView', nav: 'navEval', title: 'Teachers Evaluation', sub: 'Build evaluation workbooks from the Drive folder' },
         procedures: { el: 'proceduresView', nav: 'navProcedures', title: 'Assessment Procedures', sub: 'Reference for student & teacher applicants' },
-        evalResults: { el: 'evalProcView', nav: 'navEvalProc', title: 'Evaluation Results', sub: 'Compute & summarize teacher evaluations' },
         profile: { el: 'profileView', nav: 'navProfile', title: 'My Profile', sub: 'Your photo, notes & profile guide' },
-        evalDash: { el: 'evalDashView', nav: 'navEvalDash', title: 'Evaluation Dashboard', sub: 'Results overview — teachers, averages, sections' },
         incidents: { el: 'incidentsView', nav: 'navIncidents', title: 'Incident Reports', sub: 'Log, view, print & manage incident reports' },
         classlists: { el: 'classListsView', nav: 'navClassLists', title: 'Class Lists', sub: 'Official class lists by year level \u00b7 SY 2026-2027' },
         routine: { el: 'routineView', nav: 'navRoutine', title: 'Routine Interviews', sub: 'Track routine interviews per guidance designate' },
@@ -88,16 +86,12 @@ SMC.app = (function () {
             hideAdminBanner();
         if (v === 'counselors')
             renderCounselors();
-        if (v === 'evaluations')
-            SMC.evaluations.load();
+        if (v === 'evaluations' && SMC.evalexport && SMC.evalexport.mount)
+            SMC.evalexport.mount();
         if (v === 'procedures')
             SMC.procedures.render();
-        if (v === 'evalResults')
-            SMC.evalproc.render();
         if (v === 'profile' && SMC.profile && SMC.profile.render)
             SMC.profile.render();
-        if (v === 'evalDash' && SMC.evalDash)
-            SMC.evalDash.render();
         if (v === 'incidents' && SMC.incidents)
             SMC.incidents.render();
         if (v === 'classlists' && SMC.classlists)
@@ -288,16 +282,12 @@ SMC.app = (function () {
         document.getElementById('navCounselors').style.display = staff ? '' : 'none';
         var neg = document.getElementById('navEvalGroup'); if (neg) neg.style.display = '';
         document.getElementById('navProcedures').style.display = '';
-        document.getElementById('navEvalProc').style.display = '';
         var np = document.getElementById('navProfile');
         if (np)
             np.style.display = '';
-        var nd = document.getElementById('navEvalDash');
-        if (nd)
-            nd.style.display = '';
-        SMC.evaluations.setUser(u);
+        if (SMC.evaluations && SMC.evaluations.setUser) SMC.evaluations.setUser(u);
         loadMaintenance();
-        SMC.evaluations.refreshChrome();
+        if (SMC.evaluations && SMC.evaluations.refreshChrome) SMC.evaluations.refreshChrome();
         if (SMC.settings && SMC.settings.setUser) SMC.settings.setUser(u);
         if (SMC.incidents && SMC.incidents.setUser) SMC.incidents.setUser(u);
         if (SMC.classlists && SMC.classlists.setUser) SMC.classlists.setUser(u);
@@ -341,7 +331,7 @@ SMC.app = (function () {
         SMC.auth.bind();
         SMC.records.bind();
         bindCounselors();
-        SMC.evaluations.bind();
+        if (SMC.evaluations && SMC.evaluations.bind) SMC.evaluations.bind();
         if (SMC.settings && SMC.settings.bind) SMC.settings.bind();
         document.getElementById('navDash').addEventListener('click', function () { showView('dashboard'); });
         var navHome = document.getElementById('navHome');
@@ -350,7 +340,6 @@ SMC.app = (function () {
         document.getElementById('navCounselors').addEventListener('click', function () { showView('counselors'); });
         document.getElementById('navEval').addEventListener('click', function () { showView('evaluations'); });
         document.getElementById('navProcedures').addEventListener('click', function () { showView('procedures'); });
-        document.getElementById('navEvalProc').addEventListener('click', function () { showView('evalResults'); });
         (function () {
             var grp = document.getElementById('navEvalGroup');
             if (!grp) return;
@@ -391,7 +380,6 @@ SMC.app = (function () {
             tut.addEventListener('click', function (e) { if (e.target === tut) closeTut(); });
             document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && tut.classList.contains('on')) closeTut(); });
         })();
-        document.getElementById('navEvalDash').addEventListener('click', function () { showView('evalDash'); });
         var dashInc = document.getElementById('dashIncidentsBtn');
         if (dashInc) dashInc.addEventListener('click', function () { showView('incidents'); });
         setupDashStudentSearch();
@@ -579,7 +567,7 @@ SMC.app = (function () {
         if (!hole || !pop || !back || !next) return;
         var steps = [
             { sel: '#navHome', ic: '\uD83C\uDFE0', t: 'Home button', d: 'Click the school logo anytime to jump back to the Dashboard.' },
-            { sel: '#navEvalGroup', ic: '\uD83E\uDDED', t: 'Teachers Evaluation', d: 'Open Teachers Evaluation to reveal Evaluation Dashboard and Evaluation results in a compact dropdown.', open: true },
+            { sel: '#navEvalGroup', ic: '\uD83E\uDDED', t: 'Teachers Evaluation', d: 'Build evaluation workbooks straight from the Drive folder, and reopen anything you already built.' },
             { sel: '#dashClStudent', ic: '\uD83D\uDD0E', t: 'Find a student', d: 'Search any student by name or Student Number and jump straight to their class record.', view: 'dashboard' },
             { sel: '#navClassLists', ic: '\uD83D\uDCCB', t: 'Class Lists', d: 'Browse every section by year level, now shown as clean, colour-coded lines you can customise.' },
             { sel: '#dashIncidentsBtn', ic: '\u26A0\uFE0F', t: 'Incident Reports', d: 'File and review incident reports quickly from the Dashboard.', view: 'dashboard' },

@@ -144,12 +144,7 @@ Authentication and student data are handled by a secure server. No passwords, re
 <button class="sbi" id="navEval">
 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
 <span>Teachers Evaluation</span>
-<svg class="sbcaret" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
 </button>
-<div class="sbsub" id="navEvalSub">
-<button class="sbsubi" id="navEvalDash"><span>Evaluation Dashboard</span></button>
-<button class="sbsubi" id="navEvalProc"><span>Evaluation results</span></button>
-</div>
 </div>
 <button class="sbi" id="navProcedures" style="display:none">
 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
@@ -325,29 +320,7 @@ Authentication and student data are handled by a secure server. No passwords, re
 </div>
 
 <div id="evalView" style="display:none">
-<div class="panel">
-<div class="ph">
-<span class="ph-t">Teacher Evaluation Tracker</span>
-<div class="ph-actions">
-<span id="evalCount" style="font-size:12px;color:var(--mist)"></span>
-<button class="abtn-sm" id="evalNewBtn" style="display:none">+ New Evaluation</button>
-</div>
-</div>
-<div class="frow">
-<div class="fi"><label for="evalStatusFilter">Status</label>
-<select id="evalStatusFilter"><option value="">All</option><option value="Pending">Pending</option><option value="Started">Started</option><option value="Done">Done</option></select>
-</div>
-<div class="fi fi-grow"><label for="evalSearch">Search teacher</label>
-<input type="text" id="evalSearch" placeholder="Search teachers…" autocomplete="off" aria-label="Search teachers">
-</div>
-</div>
-<div class="tw">
-<table>
-<thead><tr><th>#</th><th>Evaluation</th><th>Teacher</th><th>Status</th><th>Assigned To</th><th>Checked By</th><th>Actions</th></tr></thead>
-<tbody id="evalTbody"></tbody>
-</table>
-</div>
-</div>
+<div id="ebMount"></div>
 </div>
 
 <div id="proceduresView" style="display:none">
@@ -358,18 +331,8 @@ Authentication and student data are handled by a secure server. No passwords, re
 </div>
 </div>
 
-<div id="evalProcView" style="display:none">
-<div class="panel">
-<div class="ph">
-<span class="ph-t">Teacher Evaluation Results</span>
-</div>
-<div id="evalProcBody"></div>
-</div>
-</div>
-
 <div id="profileView" style="display:none"></div>
 
-<div id="evalDashView" style="display:none"></div>
 <div id="incidentsView" style="display:none"></div>
 <div id="classListsView" style="display:none"></div>
 <div id="routineView" style="display:none"></div>
@@ -578,13 +541,8 @@ Save PDF</button>
 <script src="js/charts.js"></script>
 <script src="js/export.js"></script>
 <script src="js/records.js"></script>
-<script src="js/evaluations.js"></script>
 <script src="js/procedures.js"></script>
-<script src="js/evalproc.js"></script>
-<script src="js/evaltemplate.js"></script>
-<script src="js/evalbuild.js"></script>
 <script src="js/evalexport.js"></script>
-<script src="js/evaldash.js"></script>
 <script src="js/profile.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/incidents.js"></script>

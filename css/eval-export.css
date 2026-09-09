@@ -103,3 +103,35 @@
     .ex-btn, .ex-btn-ghost { width: 100%; }
     .ex-table { display: block; overflow-x: auto; white-space: nowrap; }
 }
+
+
+/* ---- Generated Evaluations browser ---- */
+.ex-saved-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 22px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(148, 163, 184, .25);
+}
+.ex-saved-title { margin: 0; font-size: 15px; font-weight: 650; }
+.ex-saved-sub { margin: 6px 0 10px; }
+.ex-saved-group {
+    border: 1px solid rgba(148, 163, 184, .25);
+    border-radius: 10px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+}
+.ex-saved-group summary {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-weight: 600;
+}
+.ex-saved-teacher { letter-spacing: .01em; }
+.ex-saved-count { font-size: 12px; opacity: .7; font-weight: 500; }
+.ex-saved-group .ex-table { margin-top: 8px; }
+.ex-saved-group .ex-table td { padding: 5px 8px; vertical-align: top; }

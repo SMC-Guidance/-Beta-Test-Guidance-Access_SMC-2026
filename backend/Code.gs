@@ -132,6 +132,10 @@ function doPost(e) {
             case 'processEval': return ok(handleProcessEval(requireStaff(session), payload));
             case 'quickProcessEval': return ok(handleQuickProcess(requireStaff(session), payload));
             case 'listForms': return ok(handleListForms(requireStaff(session)));
+            case 'listEvalBatches': return ok(handleListEvalBatches(requireStaff(session)));
+            case 'buildEvalWorkbooks': return ok(handleBuildEvalWorkbooks(requireStaff(session), payload));
+            case 'diagnoseEvalFolder': return ok(handleDiagnoseEvalFolder(requireStaff(session)));
+            case 'listGeneratedEvals': return ok(handleListGeneratedEvals(requireStaff(session)));
             case 'getFormResponses': return ok(handleGetFormResponses(requireStaff(session), payload));
             case 'getMaintenance': return ok(handleGetMaintenance(session));
             case 'setMaintenance': return ok(handleSetMaintenance(requireAdmin(session), payload));

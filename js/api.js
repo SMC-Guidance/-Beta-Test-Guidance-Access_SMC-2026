@@ -39,12 +39,53 @@ SMC.api = (function () {
             token: getToken(),
             payload: payload || {}
         });
-        return fetch(url, {
+        // Long scans can outlast the default browser timeout, and a killed or
+        // blocked request otherwise surfaces as the bare browser text
+        // "Failed to fetch", which tells the user nothing. Give it a real
+        // deadline and a message that explains what to check.
+        var controller = null, timer = null;
+        var opts = {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: body
+        };
+        try {
+            if (typeof AbortController === 'function') {
+                controller = new AbortController();
+                opts.signal = controller.signal;
+                timer = setTimeout(function () { try { controller.abort(); } catch (e) { } }, 360000);
+            }
+        } catch (e) { }
+
+        function clearTimer() { if (timer) { clearTimeout(timer); timer = null; } }
+
+        return fetch(url, opts).catch(function (netErr) {
+            clearTimer();
+            var aborted = netErr && (netErr.name === 'AbortError');
+            if (aborted) {
+                throw new Error('The server did not answer within 6 minutes, so the request was ' +
+                    'stopped. Google cuts off any Apps Script request at that point. Try one ' +
+                    'teacher folder at a time instead of all of them.');
+            }
+            if (!navigator.onLine) {
+                throw new Error('You appear to be offline. Check your internet connection and try again.');
+            }
+            throw new Error('Could not reach the backend. This is usually one of three things: ' +
+                '(1) the Apps Script deployment was not updated - open Deploy > Manage deployments ' +
+                'and publish a New version; (2) the web app access is not set to "Anyone", so ' +
+                'Google redirects to a sign-in page the site cannot read; or (3) the request was ' +
+                'cut off. Original browser message: ' + (netErr && netErr.message ? netErr.message : netErr));
         }).then(function (r) {
-            return r.json().catch(function () { throw new Error('Bad server response.'); });
+            clearTimer();
+            if (!r.ok && r.status >= 500) {
+                throw new Error('The backend returned an error (HTTP ' + r.status + '). ' +
+                    'Open the Apps Script project and check Executions for the failing run.');
+            }
+            return r.json().catch(function () {
+                throw new Error('The backend replied with something that is not JSON. That normally ' +
+                    'means the deployment URL is serving a Google sign-in or error page. Confirm the ' +
+                    'web app is deployed with access set to "Anyone".');
+            });
         }).then(function (res) {
             if (!res || res.ok !== true) {
                 var msg = (res && res.error) || 'Request failed.';
@@ -110,6 +151,8 @@ SMC.api = (function () {
         listForms: function () { return call('listForms', {}); },
         listEvalBatches: function () { return call('listEvalBatches', {}); },
         buildEvalWorkbooks: function (opts) { return call('buildEvalWorkbooks', opts || {}); },
+        diagnoseEvalFolder: function () { return call('diagnoseEvalFolder', {}); },
+        listGeneratedEvals: function () { return call('listGeneratedEvals', {}); },
         getFormResponses: function (fileId) { return call('getFormResponses', { fileId: fileId }); },
         getMaintenance: function () { return call('getMaintenance', {}); },
         setMaintenance: function (view, on) { return call('setMaintenance', { view: view, on: !!on }); },

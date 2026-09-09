@@ -434,6 +434,69 @@ function evalOutputFolder() {
     return existing.hasNext() ? existing.next() : root.createFolder('Generated Evaluations');
 }
 
+/**
+ * Get-or-create a folder for one teacher inside "Generated Evaluations",
+ * so the output is easy to browse instead of one flat pile of files.
+ */
+function evalTeacherFolder(outFolder, teacherLabel) {
+    var name = String(teacherLabel || '').trim() || 'UNSORTED';
+    name = name.replace(/[\/\\]+/g, '-').replace(/\s+/g, ' ');
+    var existing = outFolder.getFoldersByName(name);
+    return existing.hasNext() ? existing.next() : outFolder.createFolder(name);
+}
+
+/**
+ * Lists everything already built, grouped by teacher folder, so the website
+ * can link straight to past results instead of rebuilding them.
+ */
+function handleListGeneratedEvals(session) {
+    var outFolder = evalOutputFolder();
+    var teachers = [], totalFiles = 0;
+
+    function describe(f) {
+        var when = '';
+        try {
+            var d = f.getLastUpdated();
+            if (d) when = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+        } catch (e) { /* keep going without a date */ }
+        return {
+            name: f.getName(),
+            url: f.getUrl(),
+            id: f.getId(),
+            xlsxUrl: 'https://docs.google.com/spreadsheets/d/' + f.getId() + '/export?format=xlsx',
+            updated: when
+        };
+    }
+
+    var folders = outFolder.getFolders();
+    while (folders.hasNext()) {
+        var tf = folders.next();
+        var items = [];
+        var files = tf.getFiles();
+        while (files.hasNext()) items.push(describe(files.next()));
+        items.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
+        totalFiles += items.length;
+        teachers.push({ teacher: tf.getName(), url: tf.getUrl(), files: items });
+    }
+
+    // Older builds wrote straight into the root, so surface those too.
+    var loose = [];
+    var rootFiles = outFolder.getFiles();
+    while (rootFiles.hasNext()) loose.push(describe(rootFiles.next()));
+    loose.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
+    totalFiles += loose.length;
+
+    teachers.sort(function (a, b) { return a.teacher < b.teacher ? -1 : (a.teacher > b.teacher ? 1 : 0); });
+
+    return {
+        outputFolder: outFolder.getName(),
+        outputFolderUrl: outFolder.getUrl(),
+        teachers: teachers,
+        looseFiles: loose,
+        totalFiles: totalFiles
+    };
+}
+
 /** Reads any supported response file into { name, headers, rows }. */
 function evalReadResponseFile(file) {
     var mime = file.getMimeType();
@@ -607,7 +670,12 @@ function handleBuildEvalWorkbooks(session, p) {
                 continue;
             }
 
-            var result = evalWriteWorkbook(templateId, tk, records, fileName, outFolder, notes);
+            // Each teacher gets their own subfolder inside Generated
+            // Evaluations, so JHS and SHS files for one teacher sit
+            // together and are easy to find later.
+            var destFolder = evalTeacherFolder(outFolder, teacherLabel);
+
+            var result = evalWriteWorkbook(templateId, tk, records, fileName, destFolder, notes);
             created.push({
                 name: result.name,
                 template: EVAL_TEMPLATES[tk].label,
@@ -616,7 +684,9 @@ function handleBuildEvalWorkbooks(session, p) {
                 responses: result.responses,
                 url: result.url,
                 id: result.id,
-                xlsxUrl: result.xlsxUrl
+                xlsxUrl: result.xlsxUrl,
+                folder: destFolder.getName(),
+                folderUrl: destFolder.getUrl()
             });
         }
     }
@@ -753,49 +823,141 @@ function evalResizeStudentColumns(sheet, spec, needed, notes, record) {
     if (needed < 1) needed = 1;
     if (needed === capacity) return spec.lastCol;
 
-    // Rows 6..29 cover the question grid, the section averages (15/26) and the
-    // cumulative average (28). Rows 1-5 hold the title and the teacher fields,
-    // which are single-column and must not be copied sideways.
-    var COPY_TOP = 6, COPY_BOTTOM = 29;
-    var height = COPY_BOTTOM - COPY_TOP + 1;
     var label = record && record.source ? record.source : '';
+    var step = 'start';
 
-    if (needed > capacity) {
-        var add = needed - capacity;
+    try {
+        // Never assume the sheet is as wide or tall as the spec claims. A
+        // trimmed template throws "Those columns are out of bounds" the moment
+        // a range runs past the real edge, so measure first and grow if needed.
+        var maxCols = sheet.getMaxColumns();
+        var maxRows = sheet.getMaxRows();
 
-        // Insert after the second-to-last column so the new columns land inside
-        // the block. Inserting after the LAST one would fall outside the
-        // average ranges and the formulas would silently ignore them.
-        sheet.insertColumnsAfter(spec.lastCol - 1, add);
+        // Rows 6..29 cover the question grid, the section averages (15/26) and
+        // the cumulative average (28). Rows 1-5 are the title and teacher
+        // fields, which are single-column and must not be copied sideways.
+        var COPY_TOP = 6;
+        var COPY_BOTTOM = Math.min(29, maxRows);
+        if (COPY_BOTTOM < COPY_TOP) COPY_BOTTOM = COPY_TOP;
+        var height = COPY_BOTTOM - COPY_TOP + 1;
 
-        sheet.getRange(COPY_TOP, spec.firstCol, height, 1)
-            .copyTo(sheet.getRange(COPY_TOP, spec.lastCol, height, add));
+        if (needed > capacity) {
+            var add = needed - capacity;
 
-        // copyTo also brings the sample column's values across; clear them so
-        // the new columns start empty and only formulas remain.
-        for (var r = 0; r < spec.rows.length; r++) {
-            sheet.getRange(spec.rows[r], spec.lastCol, 1, add).clearContent();
+            // Make sure the sheet physically has room before inserting.
+            step = 'widening the sheet';
+            if (maxCols < spec.lastCol) {
+                sheet.insertColumnsAfter(maxCols, spec.lastCol - maxCols);
+                maxCols = spec.lastCol;
+            }
+
+            // Insert after the second-to-last column so the new columns land
+            // inside the block. Inserting after the LAST one would fall outside
+            // the average ranges and the formulas would ignore them.
+            step = 'inserting ' + add + ' column(s) after column ' + (spec.lastCol - 1);
+            sheet.insertColumnsAfter(spec.lastCol - 1, add);
+            maxCols += add;
+
+            step = 'copying formatting into columns ' + spec.lastCol + '-' + (spec.lastCol + add - 1);
+            if (spec.lastCol + add - 1 <= maxCols) {
+                sheet.getRange(COPY_TOP, spec.firstCol, height, 1)
+                    .copyTo(sheet.getRange(COPY_TOP, spec.lastCol, height, add));
+
+                // copyTo brings the sample column's values across too; clear
+                // them so the new columns start empty and only formulas remain.
+                step = 'clearing the copied sample values';
+                for (var r = 0; r < spec.rows.length; r++) {
+                    if (spec.rows[r] <= maxRows) {
+                        sheet.getRange(spec.rows[r], spec.lastCol, 1, add).clearContent();
+                    }
+                }
+            }
+
+            if (notes) {
+                notes.push(label + ': ' + needed + ' responses, so ' + add +
+                    ' extra student column' + (add === 1 ? '' : 's') + ' were added to the ' +
+                    spec.label + ' sheet (it ships with ' + capacity + ').');
+            }
+            return spec.lastCol + add;
         }
+
+        // Fewer responses than the template allows - remove the spare columns
+        // so the averages are not diluted by empty slots.
+        var remove = capacity - needed;
+        var deleteFrom = spec.firstCol + needed;
+
+        // Only ever delete columns that actually exist.
+        if (deleteFrom > maxCols) return spec.lastCol;
+        if (deleteFrom + remove - 1 > maxCols) remove = maxCols - deleteFrom + 1;
+        if (remove < 1) return spec.lastCol;
+
+        step = 'deleting ' + remove + ' column(s) from column ' + deleteFrom;
+        sheet.deleteColumns(deleteFrom, remove);
 
         if (notes) {
-            notes.push(label + ': ' + needed + ' responses, so ' + add +
-                ' extra student column' + (add === 1 ? '' : 's') + ' were added to the ' +
-                spec.label + ' sheet (it ships with ' + capacity + ').');
+            notes.push(label + ': ' + needed + ' responses, so ' + remove +
+                ' unused student column' + (remove === 1 ? '' : 's') + ' were removed from the ' +
+                spec.label + ' sheet.');
         }
-        return spec.lastCol + add;
+        return spec.lastCol - remove;
+
+    } catch (e) {
+        // Say exactly which step failed and how big the sheet really is,
+        // instead of leaking Google's bare "out of bounds" message.
+        var dims = '';
+        try {
+            dims = ' Sheet \u201c' + sheet.getName() + '\u201d is ' +
+                sheet.getMaxRows() + ' rows x ' + sheet.getMaxColumns() + ' columns; the ' +
+                spec.label + ' layout expects student columns ' + spec.firstCol +
+                '-' + spec.lastCol + '.';
+        } catch (e2) { /* sheet unusable, report what we have */ }
+
+        throw new Error('Could not resize columns for ' + (label || 'a section') +
+            ' while ' + step + '. ' + (e.message || e) + dims +
+            ' Run testTemplateGeometry in the Apps Script editor to see the real template sizes.');
+    }
+}
+
+/**
+ * Editor diagnostic. Prints the true size of every template sheet next to what
+ * the code expects, so a mismatch is obvious at a glance.
+ */
+function testTemplateGeometry() {
+    var out = ['=== Template geometry ==='];
+    var ss;
+    try {
+        ss = SpreadsheetApp.openById(evalTemplateFileId());
+    } catch (e) {
+        out.push('Cannot open the template: ' + (e.message || e));
+        Logger.log(out.join('\n'));
+        return out.join('\n');
     }
 
-    // Fewer responses than the template allows - remove the spare columns so
-    // the averages are not diluted by empty slots.
-    var remove = capacity - needed;
-    sheet.deleteColumns(spec.firstCol + needed, remove);
+    out.push('Template workbook: ' + ss.getName());
+    out.push('');
 
-    if (notes) {
-        notes.push(label + ': ' + needed + ' responses, so ' + remove +
-            ' unused student column' + (remove === 1 ? '' : 's') + ' were removed from the ' +
-            spec.label + ' sheet.');
+    for (var k in EVAL_TEMPLATES) {
+        var spec = EVAL_TEMPLATES[k];
+        var sh = ss.getSheetByName(spec.sheetName);
+        if (!sh) {
+            out.push('MISSING  ' + spec.sheetName);
+            continue;
+        }
+        var cols = sh.getMaxColumns(), rows = sh.getMaxRows();
+        var wide = cols >= spec.lastCol + 1;
+        out.push((wide ? 'OK    ' : 'NARROW') + '  ' + spec.sheetName);
+        out.push('          actual : ' + rows + ' rows x ' + cols + ' columns');
+        out.push('          expects: student columns ' + spec.firstCol + '-' + spec.lastCol +
+            ' (' + (spec.lastCol - spec.firstCol + 1) + ' students) + averages column ' +
+            (spec.lastCol + 1));
+        if (!wide) {
+            out.push('          >>> Too narrow for the layout the code assumes.');
+        }
     }
-    return spec.lastCol - remove;
+
+    var text = out.join('\n');
+    Logger.log(text);
+    return text;
 }
 
 /** COMMENTS SUMMARY tab, in the required arrangement. */
