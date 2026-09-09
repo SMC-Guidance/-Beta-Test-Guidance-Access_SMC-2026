@@ -20,6 +20,8 @@ var CORE = [
   './js/evaluations.js',
   './js/procedures.js',
   './js/evalproc.js',
+  './js/evalexport.js',
+  './css/eval-export.css',
   './js/evaltemplate.js',
   './js/evalbuild.js',
   './js/evaldash.js',

@@ -108,6 +108,8 @@ SMC.api = (function () {
         processEval: function (id) { return call('processEval', { id: id }); },
         quickProcessEval: function (sheetId, tabName) { return call('quickProcessEval', { sheetId: sheetId, tabName: tabName }); },
         listForms: function () { return call('listForms', {}); },
+        listEvalBatches: function () { return call('listEvalBatches', {}); },
+        buildEvalWorkbooks: function (opts) { return call('buildEvalWorkbooks', opts || {}); },
         getFormResponses: function (fileId) { return call('getFormResponses', { fileId: fileId }); },
         getMaintenance: function () { return call('getMaintenance', {}); },
         setMaintenance: function (view, on) { return call('setMaintenance', { view: view, on: !!on }); },
