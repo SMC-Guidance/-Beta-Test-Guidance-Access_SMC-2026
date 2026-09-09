@@ -63,18 +63,27 @@ SMC.evalexport = (function () {
             var batches = res.batches || [];
             var html = '<option value="">All teacher folders (' + batches.length + ')</option>';
             batches.forEach(function (b) {
-                html += '<option value="' + esc(b.id) + '">' + esc(b.name) + ' (' + (b.files || 0) + ' file' + (b.files === 1 ? '' : 's') + ')</option>';
+                // files === -1 means the backend deliberately skipped counting
+                // (counting meant walking every subfolder, which took ~57s).
+                var count = (typeof b.files === 'number' && b.files >= 0)
+                    ? ' (' + b.files + ' file' + (b.files === 1 ? '' : 's') + ')'
+                    : '';
+                html += '<option value="' + esc(b.id) + '">' + esc(b.name) + count + '</option>';
             });
             sel.innerHTML = html;
-            var total = (res.totalFiles === undefined || res.totalFiles === null)
-                ? null : res.totalFiles;
+            var total = (res.totalFiles === undefined || res.totalFiles === null ||
+                res.totalFiles < 0 || res.countsSkipped) ? null : res.totalFiles;
             var extra = res.looseFiles ? ' &middot; ' + res.looseFiles + ' loose in the root' : '';
             if (total === 0) {
                 status('Source folder <b>' + esc(res.folderName) + '</b> has no readable files. ' +
                     'Press <b>Diagnose</b> to see what is in there.', 'err');
             } else {
-                status('Source folder: <b>' + esc(res.folderName) + '</b>' +
-                    (total === null ? '' : ' &middot; ' + total + ' readable file(s)') + extra);
+                status('Source folder: <b>' + esc(res.folderName) + '</b> &middot; ' +
+                    batches.length + ' teacher folder(s)' +
+                    (total === null ? '' : ' &middot; ' + total + ' readable file(s)') + extra +
+                    (batches.length > 20
+                        ? '. <b>Pick one teacher at a time</b> - this folder is too big to build in one go.'
+                        : ''));
             }
         }).catch(function (err) {
             status('Could not list the Drive folder: ' + esc(err && err.message ? err.message : err), 'err');
@@ -140,9 +149,13 @@ SMC.evalexport = (function () {
         SMC.api.buildEvalWorkbooks(payload).then(function (res) {
             setBusy(false);
             var n = (res.files || []).length;
-            status(dryRun
+            var left = (res && res.remaining) || [];
+            status((dryRun
                 ? 'Preview only. ' + n + ' file(s) would be created.'
-                : n + ' workbook(s) created.', 'ok');
+                : n + ' workbook(s) created.') +
+                (left.length ? ' <b>' + left.length + ' teacher folder(s) still to do</b> - ' +
+                    'pick them one at a time from the dropdown.' : ''),
+                left.length ? 'err' : 'ok');
             renderResults(res);
             if (!dryRun) toast(n + ' evaluation workbook(s) built.', 'success');
         }).catch(function (err) {

@@ -459,14 +459,14 @@ function handleListEvalBatches(session) {
     var root = formsFolder();
     var out = [];
 
-    // Counts include everything nested underneath, and follow folder shortcuts.
-    // One shared budget across all folders, so the whole request stays bounded.
-    var ctx = evalNewBudget();
+    // Only the top-level teacher folders are listed here. Counting the files
+    // inside each one meant walking the whole tree, which took ~57s on a real
+    // folder of 376 forms - far too slow just to populate a dropdown. The
+    // count is filled in when a teacher is actually previewed or built.
     var subs = evalSubFolders(root);
     for (var i = 0; i < subs.length && out.length < 300; i++) {
         var f = subs[i];
-        var entries = evalCollectEntries(f, '', 0, {}, [], ctx);
-        out.push({ id: f.getId(), name: f.getName(), files: entries.length });
+        out.push({ id: f.getId(), name: f.getName(), files: -1 });
     }
     out.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
 
@@ -478,15 +478,13 @@ function handleListEvalBatches(session) {
         if (evalIsUsableEntry(rf)) loose++;
     }
 
-    var total = loose;
-    for (var t = 0; t < out.length; t++) total += out[t].files;
-
     return {
         folderName: root.getName(),
         folderUrl: root.getUrl(),
         batches: out,
         looseFiles: loose,
-        totalFiles: total
+        totalFiles: -1,
+        countsSkipped: true
     };
 }
 
@@ -543,11 +541,25 @@ function handleBuildEvalWorkbooks(session, p) {
             ' Some teachers may be missing. Build one folder at a time if this keeps happening.');
     }
 
+    // Reading a Google Form is a network call, and this folder can hold 376 of
+    // them. There is no way to finish them all inside Google's 6-minute ceiling,
+    // so stop cleanly with time to spare and report what is left.
+    var buildStarted = Date.now();
+    var remaining = [];
+
     for (var b = 0; b < batches.length; b++) {
         var batch = batches[b];
         var byTemplate = {};
 
-        var entries = batch.entries || [];
+        if (!p.folderId && (Date.now() - buildStarted) > EVAL_BUILD_BUDGET_MS) {
+            for (var rb = b; rb < batches.length; rb++) {
+                if (batches[rb].name) remaining.push(batches[rb].name);
+            }
+            break;
+        }
+
+        // Drop "(Responses)" sheets that mirror a form in the same batch.
+        var entries = evalDedupeEntries(batch.entries || [], notes);
         for (var ei = 0; ei < entries.length; ei++) {
             var file = entries[ei].file;
             var tables = [];
@@ -609,7 +621,16 @@ function handleBuildEvalWorkbooks(session, p) {
         }
     }
 
+    if (remaining.length) {
+        notes.push('Stopped after ' + Math.round((Date.now() - buildStarted) / 1000) +
+            's to stay inside Google\u2019s 6-minute limit. Still to do (' + remaining.length +
+            '): ' + remaining.slice(0, 25).join(', ') +
+            (remaining.length > 25 ? ', \u2026' : '') +
+            '. Pick each one from the teacher dropdown and build it individually.');
+    }
+
     return {
+        remaining: remaining,
         generatedAt: nowStamp(),
         folderName: root.getName(),
         outputFolder: p.dryRun ? '' : outFolder.getName(),
@@ -1074,6 +1095,58 @@ function evalTablesFromTargets(targets, sourceLabel, notes, depth) {
 }
 
 /** True when a Drive entry is something the builder can read or follow. */
+/**
+ * Strips Google's " (Responses)" suffix so a form and its linked response
+ * sheet collapse to the same name.
+ */
+function evalBaseName(name) {
+    return String(name || '')
+        .replace(/\s*\(responses\)\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toUpperCase();
+}
+
+/**
+ * Google auto-creates a "<Form name> (Responses)" spreadsheet next to a form.
+ * It holds the SAME answers as the form, so counting both doubles every
+ * student. Keep the form and drop the matching sheet.
+ */
+function evalDedupeEntries(entries, notes) {
+    var formNames = {};
+    var i, e;
+
+    for (i = 0; i < entries.length; i++) {
+        try {
+            if (entries[i].file.getMimeType() === MimeType.GOOGLE_FORMS) {
+                formNames[evalBaseName(entries[i].file.getName())] = true;
+            }
+        } catch (err) { /* unreadable entry, leave it for the main loop */ }
+    }
+
+    var kept = [], dropped = 0;
+    for (i = 0; i < entries.length; i++) {
+        e = entries[i];
+        var isDupeSheet = false;
+        try {
+            var nm = e.file.getName();
+            isDupeSheet = e.file.getMimeType() === MimeType.GOOGLE_SHEETS &&
+                /\(responses\)\s*$/i.test(nm) &&
+                formNames[evalBaseName(nm)] === true;
+        } catch (err) { isDupeSheet = false; }
+
+        if (isDupeSheet) { dropped++; continue; }
+        kept.push(e);
+    }
+
+    if (dropped && notes) {
+        notes.push('Ignored ' + dropped + ' \u201c(Responses)\u201d sheet' +
+            (dropped === 1 ? '' : 's') + ' that duplicate their Google Form, ' +
+            'so no student is counted twice.');
+    }
+    return kept;
+}
+
 function evalIsUsableEntry(file) {
     var mime = file.getMimeType();
     if (mime === MimeType.GOOGLE_FORMS) return true;
@@ -1169,6 +1242,9 @@ var EVAL_MAX_DEPTH = 10;
 // Google kills any web-app request at 6 minutes with no result at all. These
 // caps make the scan always come back with something useful instead.
 var EVAL_TIME_BUDGET_MS = 70 * 1000;
+// Wall-clock ceiling for a whole "build everything" request. Google kills any
+// Apps Script request at 6 minutes; stopping at 4 leaves room to save results.
+var EVAL_BUILD_BUDGET_MS = 240 * 1000;
 var EVAL_MAX_FOLDERS = 400;
 
 /** Shared walk state: what we have already seen, and how much time is left. */
