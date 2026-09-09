@@ -460,10 +460,12 @@ function handleListEvalBatches(session) {
     var out = [];
 
     // Counts include everything nested underneath, and follow folder shortcuts.
+    // One shared budget across all folders, so the whole request stays bounded.
+    var ctx = evalNewBudget();
     var subs = evalSubFolders(root);
     for (var i = 0; i < subs.length && out.length < 300; i++) {
         var f = subs[i];
-        var entries = evalCollectEntries(f, '', 0, {}, []);
+        var entries = evalCollectEntries(f, '', 0, {}, [], ctx);
         out.push({ id: f.getId(), name: f.getName(), files: entries.length });
     }
     out.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
@@ -502,9 +504,10 @@ function handleBuildEvalWorkbooks(session, p) {
     var root = formsFolder();
 
     var batches = [];
+    var walkCtx = evalNewBudget();   // one shared budget for the whole request
     if (p.folderId) {
         var one = DriveApp.getFolderById(String(p.folderId));
-        batches.push({ name: one.getName(), folder: one, entries: evalCollectEntries(one, '', 0, {}, []) });
+        batches.push({ name: one.getName(), folder: one, entries: evalCollectEntries(one, '', 0, {}, [], walkCtx) });
     } else {
         // One batch per teacher folder, following folder shortcuts.
         var subs = evalSubFolders(root);
@@ -512,7 +515,7 @@ function handleBuildEvalWorkbooks(session, p) {
             batches.push({
                 name: subs[si].getName(),
                 folder: subs[si],
-                entries: evalCollectEntries(subs[si], '', 0, {}, [])
+                entries: evalCollectEntries(subs[si], '', 0, {}, [], walkCtx)
             });
         }
 
@@ -534,6 +537,10 @@ function handleBuildEvalWorkbooks(session, p) {
     if (!totalEntries) {
         notes.push('Nothing readable was found in \u201c' + root.getName() + '\u201d. ' +
             'Press Diagnose to see every file the script can see and why it was skipped.');
+    }
+    if (walkCtx.stopped) {
+        notes.push('The folder scan was cut short. ' + walkCtx.stopped +
+            ' Some teachers may be missing. Build one folder at a time if this keeps happening.');
     }
 
     for (var b = 0; b < batches.length; b++) {
@@ -821,16 +828,36 @@ function evalTargetsFromText(text) {
 }
 
 /** Drive API v3 lookup. Needed because DriveApp cannot follow shortcuts. */
+// Memo for the run. The same shortcut gets inspected by evalSubFolders, then
+// again by evalCollectEntries, then again by the diagnose walk. Without this
+// cache that is 3-4 network round trips per shortcut, which is what made the
+// Diagnose button feel slow.
+var __evalMetaCache = {};
+
 function evalDriveMeta(id) {
-    var url = 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) +
-        '?supportsAllDrives=true&fields=id,name,mimeType,shortcutDetails';
-    var res = UrlFetchApp.fetch(url, {
-        method: 'get',
-        muteHttpExceptions: true,
-        headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }
-    });
-    if (res.getResponseCode() !== 200) return null;
-    try { return JSON.parse(res.getContentText()); } catch (e) { return null; }
+    id = String(id);
+    if (Object.prototype.hasOwnProperty.call(__evalMetaCache, id)) {
+        return __evalMetaCache[id];
+    }
+
+    var out = null;
+    try {
+        var url = 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) +
+            '?supportsAllDrives=true&fields=id,name,mimeType,shortcutDetails';
+        var res = UrlFetchApp.fetch(url, {
+            method: 'get',
+            muteHttpExceptions: true,
+            headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }
+        });
+        if (res.getResponseCode() === 200) {
+            out = JSON.parse(res.getContentText());
+        }
+    } catch (e) {
+        out = null;
+    }
+
+    __evalMetaCache[id] = out;
+    return out;
 }
 
 /** Reads the text out of any file that might be carrying links. */
@@ -1139,14 +1166,99 @@ function testEvalLinkDetection() {
 
 var EVAL_MAX_DEPTH = 10;
 
-/** If this entry is a shortcut pointing at a folder, return that folder. */
+// Google kills any web-app request at 6 minutes with no result at all. These
+// caps make the scan always come back with something useful instead.
+var EVAL_TIME_BUDGET_MS = 70 * 1000;
+var EVAL_MAX_FOLDERS = 400;
+
+/** Shared walk state: what we have already seen, and how much time is left. */
+function evalNewBudget() {
+    return { started: Date.now(), visited: {}, folders: 0, stopped: '' };
+}
+
+/** True once the walk must stop. Records why, so the UI can say so. */
+function evalBudgetSpent(ctx) {
+    if (ctx.stopped) return true;
+    if (ctx.folders >= EVAL_MAX_FOLDERS) {
+        ctx.stopped = 'Stopped after ' + EVAL_MAX_FOLDERS + ' folders.';
+        return true;
+    }
+    if (Date.now() - ctx.started > EVAL_TIME_BUDGET_MS) {
+        ctx.stopped = 'Stopped after ' + Math.round(EVAL_TIME_BUDGET_MS / 1000) + ' seconds.';
+        return true;
+    }
+    return false;
+}
+
+/**
+ * If this entry is a shortcut pointing at a folder, return that folder.
+ * Results are cached per run because the same shortcut is tested more than once.
+ */
+var __evalShortcutFolderCache = {};
+
 function evalFolderFromShortcut(file) {
     if (file.getMimeType() !== EVAL_SHORTCUT_MIME) return null;
+
+    var key = file.getId();
+    if (Object.prototype.hasOwnProperty.call(__evalShortcutFolderCache, key)) {
+        return __evalShortcutFolderCache[key];
+    }
+    __evalShortcutFolderCache[key] = null;   // set before returning on any path
+
     var meta = evalDriveMeta(file.getId());
     var details = meta && meta.shortcutDetails;
     if (!details || !details.targetId) return null;
     if (details.targetMimeType !== 'application/vnd.google-apps.folder') return null;
-    try { return DriveApp.getFolderById(details.targetId); } catch (e) { return null; }
+
+    try {
+        var folder = DriveApp.getFolderById(details.targetId);
+        __evalShortcutFolderCache[key] = folder;
+        return folder;
+    } catch (e) {
+        return null;
+    }
+}
+
+/** Direct subfolders only. Does not list files, so it is cheap. */
+function evalDirectSubFolders(folder) {
+    var out = [], seen = {};
+    var direct = folder.getFolders();
+    while (direct.hasNext()) {
+        var d = direct.next();
+        if (d.getName() === 'Generated Evaluations') continue;
+        if (seen[d.getId()]) continue;
+        seen[d.getId()] = true;
+        out.push(d);
+    }
+    return out;
+}
+
+/**
+ * Single pass over one folder's files. Listing a folder is the expensive part,
+ * so files and folder-shortcuts are gathered together rather than by listing
+ * the same folder twice.
+ * @return {{entries:Array, shortcutFolders:Array}}
+ */
+function evalScanFolderFiles(folder, pathLabel) {
+    var entries = [], shortcutFolders = [];
+    var files = folder.getFiles();
+
+    while (files.hasNext()) {
+        var file = files.next();
+
+        if (file.getMimeType() === EVAL_SHORTCUT_MIME) {
+            var target = evalFolderFromShortcut(file);
+            if (target) {
+                // A shortcut to a folder is a branch, not a readable file.
+                if (target.getName() !== 'Generated Evaluations') shortcutFolders.push(target);
+                continue;
+            }
+        }
+
+        entries.push({ file: file, path: pathLabel });
+    }
+
+    return { entries: entries, shortcutFolders: shortcutFolders };
 }
 
 /** Every real subfolder of a folder, including ones reached via shortcut. */
@@ -1181,30 +1293,40 @@ function evalSubFolders(folder) {
  * evalTablesFromEntry can resolve them.
  * @return {Array<{file:Object, path:string}>}
  */
-function evalCollectEntries(folder, pathLabel, depth, seenFiles, out) {
+function evalCollectEntries(folder, pathLabel, depth, seenFiles, out, ctx) {
     depth = depth || 0;
     seenFiles = seenFiles || {};
     out = out || [];
+    ctx = ctx || evalNewBudget();
+
     if (depth > EVAL_MAX_DEPTH || out.length >= 800) return out;
+    if (evalBudgetSpent(ctx)) return out;
 
-    var files = folder.getFiles();
-    while (files.hasNext() && out.length < 800) {
-        var file = files.next();
-        var id = file.getId();
+    // A folder must never be walked twice. Shortcuts can point at a parent, or
+    // at My Drive itself, which would otherwise loop forever.
+    var folderId = folder.getId();
+    if (ctx.visited[folderId]) return out;
+    ctx.visited[folderId] = true;
+    ctx.folders++;
+
+    // One listing of this folder gives us both its files and its shortcut branches.
+    var scan = evalScanFolderFiles(folder, pathLabel);
+
+    for (var e = 0; e < scan.entries.length && out.length < 800; e++) {
+        var entry = scan.entries[e];
+        var id = entry.file.getId();
         if (seenFiles[id]) continue;
-
-        // A folder shortcut is not a readable entry - it is handled below.
-        if (file.getMimeType() === EVAL_SHORTCUT_MIME && evalFolderFromShortcut(file)) continue;
-
         seenFiles[id] = true;
-        if (evalIsUsableEntry(file)) out.push({ file: file, path: pathLabel });
+        if (evalIsUsableEntry(entry.file)) out.push(entry);
     }
 
-    var subs = evalSubFolders(folder);
+    var subs = evalDirectSubFolders(folder).concat(scan.shortcutFolders);
     for (var i = 0; i < subs.length; i++) {
+        if (evalBudgetSpent(ctx)) return out;
         var sub = subs[i];
+        if (ctx.visited[sub.getId()]) continue;
         var childPath = pathLabel ? pathLabel + ' / ' + sub.getName() : sub.getName();
-        evalCollectEntries(sub, childPath, depth + 1, seenFiles, out);
+        evalCollectEntries(sub, childPath, depth + 1, seenFiles, out, ctx);
     }
 
     return out;
@@ -1217,11 +1339,20 @@ function evalCollectEntries(folder, pathLabel, depth, seenFiles, out) {
 function handleDiagnoseEvalFolder(session) {
     var root = formsFolder();
     var rows = [];
-    var counts = { usable: 0, skipped: 0, folders: 0, shortcutFolders: 0 };
+    var counts = { usable: 0, skipped: 0, folders: 0, shortcutFolders: 0, loops: 0 };
+    var ctx = evalNewBudget();
 
     function walk(folder, pathLabel, depth) {
         if (depth > EVAL_MAX_DEPTH || rows.length >= 400) return;
+        if (evalBudgetSpent(ctx)) return;
 
+        // Never walk the same folder twice; shortcuts can form loops.
+        var fid = folder.getId();
+        if (ctx.visited[fid]) { counts.loops++; return; }
+        ctx.visited[fid] = true;
+        ctx.folders++;
+
+        var branches = [];   // folder shortcuts found while listing, walked below
         var files = folder.getFiles();
         while (files.hasNext() && rows.length < 400) {
             var file = files.next();
@@ -1234,6 +1365,8 @@ function handleDiagnoseEvalFolder(session) {
                 target = details ? (details.targetMimeType || 'unknown target') : 'UNRESOLVED';
                 if (details && details.targetMimeType === 'application/vnd.google-apps.folder') {
                     counts.shortcutFolders++;
+                    var branch = evalFolderFromShortcut(file);
+                    if (branch) branches.push(branch);
                     rows.push({
                         path: pathLabel, name: file.getName(), mime: 'shortcut -> folder',
                         usable: true, note: 'followed as a subfolder'
@@ -1253,10 +1386,13 @@ function handleDiagnoseEvalFolder(session) {
             });
         }
 
-        var subs = evalSubFolders(folder);
+        // Reuse the listing above instead of listing this folder a second time.
+        var subs = evalDirectSubFolders(folder).concat(branches);
         counts.folders += subs.length;
         for (var i = 0; i < subs.length; i++) {
+            if (evalBudgetSpent(ctx)) return;
             var sub = subs[i];
+            if (ctx.visited[sub.getId()]) { counts.loops++; continue; }
             walk(sub, pathLabel ? pathLabel + ' / ' + sub.getName() : sub.getName(), depth + 1);
         }
     }
@@ -1269,6 +1405,8 @@ function handleDiagnoseEvalFolder(session) {
         folderUrl: root.getUrl(),
         counts: counts,
         entries: rows,
-        capped: rows.length >= 400
+        elapsedMs: Date.now() - ctx.started,
+        stopped: ctx.stopped,
+        capped: rows.length >= 400 || !!ctx.stopped
     };
 }

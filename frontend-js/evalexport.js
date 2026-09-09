@@ -166,10 +166,12 @@ SMC.evalexport = (function () {
         SMC.api.diagnoseEvalFolder().then(function (res) {
             setBusy(false);
             var c = res.counts || {};
+            var secs = res.elapsedMs ? ' in ' + (res.elapsedMs / 1000).toFixed(1) + 's' : '';
             status('Folder <b>' + esc(res.folderName) + '</b>: ' +
                 (c.usable || 0) + ' readable, ' + (c.skipped || 0) + ' skipped, ' +
                 (c.folders || 0) + ' subfolder(s)' +
-                (c.shortcutFolders ? ', ' + c.shortcutFolders + ' folder shortcut(s)' : ''),
+                (c.shortcutFolders ? ', ' + c.shortcutFolders + ' folder shortcut(s)' : '') +
+                (c.loops ? ', ' + c.loops + ' shortcut loop(s) skipped' : '') + secs,
                 (c.usable ? 'ok' : 'err'));
 
             var rows = res.entries || [];
@@ -193,7 +195,13 @@ SMC.evalexport = (function () {
                     '</tr>';
             });
             html += '</tbody></table>';
-            if (res.capped) html += '<p class="ex-foot">Only the first 400 entries are shown.</p>';
+            if (res.stopped) {
+                html = '<div class="ex-notes"><b>The scan was cut short.</b> ' + esc(res.stopped) +
+                    ' This usually means the folder tree is very large, or a shortcut points at a ' +
+                    'parent folder or at your whole Drive. Check the Folder column below for any ' +
+                    'path that looks unrelated to evaluations.</div>' + html;
+            }
+            if (res.capped && !res.stopped) html += '<p class="ex-foot">Only the first 400 entries are shown.</p>';
             if (res.folderUrl) {
                 html += '<p class="ex-foot">Scanned <a class="ex-link" target="_blank" rel="noopener" href="' +
                     esc(res.folderUrl) + '">' + esc(res.folderName) + '</a>.</p>';
