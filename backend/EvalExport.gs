@@ -706,14 +706,12 @@ function evalFillSheet(sheet, spec, record, notes) {
     sheet.getRange('B3').setValue(record.subject);
     sheet.getRange('B4').setValue(record.section);
 
-    var capacity = spec.lastCol - spec.firstCol + 1;
     var students = record.students;
-    if (students.length > capacity) {
-        notes.push(record.source + ': ' + students.length + ' responses exceed the '
-            + spec.label + ' template capacity of ' + capacity + ' columns. Extra responses were left out.');
-        students = students.slice(0, capacity);
-    }
     if (!students.length) return;
+
+    // Grow or shrink the student columns to match the actual response count,
+    // instead of throwing away responses past the template's default width.
+    evalResizeStudentColumns(sheet, spec, students.length, notes, record);
 
     // One batched write per question row keeps this fast on big folders.
     for (var r = 0; r < spec.rows.length; r++) {
@@ -731,6 +729,73 @@ function evalFillSheet(sheet, spec, record, notes) {
             sheet.getRange(spec.rows[r], spec.firstCol, 1, rowValues.length).setValues([rowValues]);
         }
     }
+}
+
+/**
+ * Makes the sheet hold exactly `needed` student columns.
+ *
+ * The template ships with a fixed number of S1..Sn columns (18 for Senior
+ * High, 38 for Junior High, and so on). Real sections can be larger or
+ * smaller. Rather than dropping responses, insert or delete columns.
+ *
+ * Both operations happen strictly INSIDE the existing block, which is what
+ * makes this safe: Google Sheets then rewrites the surrounding formulas by
+ * itself, so the row averages (=AVERAGE(B7:S7)) and the cumulative average
+ * keep pointing at the full block without being touched directly.
+ *
+ * Newly inserted columns are copied from the first student column, so they
+ * inherit its formatting and its per-column average formulas in rows 15/26.
+ *
+ * @returns the column index of the last student column afterwards
+ */
+function evalResizeStudentColumns(sheet, spec, needed, notes, record) {
+    var capacity = spec.lastCol - spec.firstCol + 1;
+    if (needed < 1) needed = 1;
+    if (needed === capacity) return spec.lastCol;
+
+    // Rows 6..29 cover the question grid, the section averages (15/26) and the
+    // cumulative average (28). Rows 1-5 hold the title and the teacher fields,
+    // which are single-column and must not be copied sideways.
+    var COPY_TOP = 6, COPY_BOTTOM = 29;
+    var height = COPY_BOTTOM - COPY_TOP + 1;
+    var label = record && record.source ? record.source : '';
+
+    if (needed > capacity) {
+        var add = needed - capacity;
+
+        // Insert after the second-to-last column so the new columns land inside
+        // the block. Inserting after the LAST one would fall outside the
+        // average ranges and the formulas would silently ignore them.
+        sheet.insertColumnsAfter(spec.lastCol - 1, add);
+
+        sheet.getRange(COPY_TOP, spec.firstCol, height, 1)
+            .copyTo(sheet.getRange(COPY_TOP, spec.lastCol, height, add));
+
+        // copyTo also brings the sample column's values across; clear them so
+        // the new columns start empty and only formulas remain.
+        for (var r = 0; r < spec.rows.length; r++) {
+            sheet.getRange(spec.rows[r], spec.lastCol, 1, add).clearContent();
+        }
+
+        if (notes) {
+            notes.push(label + ': ' + needed + ' responses, so ' + add +
+                ' extra student column' + (add === 1 ? '' : 's') + ' were added to the ' +
+                spec.label + ' sheet (it ships with ' + capacity + ').');
+        }
+        return spec.lastCol + add;
+    }
+
+    // Fewer responses than the template allows - remove the spare columns so
+    // the averages are not diluted by empty slots.
+    var remove = capacity - needed;
+    sheet.deleteColumns(spec.firstCol + needed, remove);
+
+    if (notes) {
+        notes.push(label + ': ' + needed + ' responses, so ' + remove +
+            ' unused student column' + (remove === 1 ? '' : 's') + ' were removed from the ' +
+            spec.label + ' sheet.');
+    }
+    return spec.lastCol - remove;
 }
 
 /** COMMENTS SUMMARY tab, in the required arrangement. */
