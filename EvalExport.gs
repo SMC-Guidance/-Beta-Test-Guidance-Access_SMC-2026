@@ -37,7 +37,7 @@ var EVAL_TEMPLATES = {
         sheetName: 'SENIOR HIGH SCHOOL TEMPLATE',
         label: 'SENIOR HIGH SCHOOL',
         rows: [7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 21, 22, 23, 24, 25],
-        firstCol: 2, lastCol: 19
+        firstCol: 2, lastCol: 34   // B..AH = 33 students, AVERAGES in AI
     },
     jhs: {
         sheetName: 'JUNIOR HIGH SCHOOL TEMPLATE',
@@ -49,7 +49,7 @@ var EVAL_TEMPLATES = {
         sheetName: 'G5-G6 TEMPLATE',
         label: 'G5-G6',
         rows: [7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 21, 22, 23, 24, 25],
-        firstCol: 2, lastCol: 20
+        firstCol: 2, lastCol: 36   // B..AJ = 35 students, AVERAGES in AK
     },
     g3g4: {
         sheetName: 'G3-G4 TEMPLATE',
@@ -479,7 +479,6 @@ function handleListGeneratedEvals(session) {
         teachers.push({ teacher: tf.getName(), url: tf.getUrl(), files: items });
     }
 
-    // Older builds wrote straight into the root, so surface those too.
     var loose = [];
     var rootFiles = outFolder.getFiles();
     while (rootFiles.hasNext()) loose.push(describe(rootFiles.next()));
@@ -671,8 +670,7 @@ function handleBuildEvalWorkbooks(session, p) {
             }
 
             // Each teacher gets their own subfolder inside Generated
-            // Evaluations, so JHS and SHS files for one teacher sit
-            // together and are easy to find later.
+            // Evaluations, so their files are easy to find later.
             var destFolder = evalTeacherFolder(outFolder, teacherLabel);
 
             var result = evalWriteWorkbook(templateId, tk, records, fileName, destFolder, notes);
