@@ -458,27 +458,34 @@ function evalReadResponseFile(file) {
 function handleListEvalBatches(session) {
     var root = formsFolder();
     var out = [];
-    var subs = root.getFolders();
-    while (subs.hasNext() && out.length < 300) {
-        var f = subs.next();
-        if (f.getName() === 'Generated Evaluations') continue;
-        var count = 0;
-        var files = f.getFiles();
-        while (files.hasNext()) {
-            var mt = files.next().getMimeType();
-            if (mt === MimeType.GOOGLE_FORMS || mt === MimeType.GOOGLE_SHEETS || mt === 'text/csv') count++;
-        }
-        out.push({ id: f.getId(), name: f.getName(), files: count });
+
+    // Counts include everything nested underneath, and follow folder shortcuts.
+    var subs = evalSubFolders(root);
+    for (var i = 0; i < subs.length && out.length < 300; i++) {
+        var f = subs[i];
+        var entries = evalCollectEntries(f, '', 0, {}, []);
+        out.push({ id: f.getId(), name: f.getName(), files: entries.length });
     }
     out.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
 
+    // Files sitting directly in the root, not inside any teacher folder.
     var loose = 0, rootFiles = root.getFiles();
     while (rootFiles.hasNext()) {
-        var rmt = rootFiles.next().getMimeType();
-        if (rmt === MimeType.GOOGLE_FORMS || rmt === MimeType.GOOGLE_SHEETS || rmt === 'text/csv') loose++;
+        var rf = rootFiles.next();
+        if (rf.getMimeType() === EVAL_SHORTCUT_MIME && evalFolderFromShortcut(rf)) continue;
+        if (evalIsUsableEntry(rf)) loose++;
     }
 
-    return { folderName: root.getName(), batches: out, looseFiles: loose };
+    var total = loose;
+    for (var t = 0; t < out.length; t++) total += out[t].files;
+
+    return {
+        folderName: root.getName(),
+        folderUrl: root.getUrl(),
+        batches: out,
+        looseFiles: loose,
+        totalFiles: total
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -497,43 +504,63 @@ function handleBuildEvalWorkbooks(session, p) {
     var batches = [];
     if (p.folderId) {
         var one = DriveApp.getFolderById(String(p.folderId));
-        batches.push({ name: one.getName(), folder: one });
+        batches.push({ name: one.getName(), folder: one, entries: evalCollectEntries(one, '', 0, {}, []) });
     } else {
-        var subs = root.getFolders();
-        while (subs.hasNext()) {
-            var sf = subs.next();
-            if (sf.getName() === 'Generated Evaluations') continue;
-            batches.push({ name: sf.getName(), folder: sf });
+        // One batch per teacher folder, following folder shortcuts.
+        var subs = evalSubFolders(root);
+        for (var si = 0; si < subs.length; si++) {
+            batches.push({
+                name: subs[si].getName(),
+                folder: subs[si],
+                entries: evalCollectEntries(subs[si], '', 0, {}, [])
+            });
         }
-        batches.push({ name: '', folder: root });   // loose files in the root
+
+        // Plus any files sitting loose in the root, grouped on their own.
+        var rootEntries = [], rootFiles = root.getFiles();
+        while (rootFiles.hasNext()) {
+            var rf = rootFiles.next();
+            if (rf.getMimeType() === EVAL_SHORTCUT_MIME && evalFolderFromShortcut(rf)) continue;
+            if (evalIsUsableEntry(rf)) rootEntries.push({ file: rf, path: '' });
+        }
+        if (rootEntries.length) batches.push({ name: '', folder: root, entries: rootEntries });
     }
 
     var outFolder = p.dryRun ? null : evalOutputFolder();
     var created = [], notes = [];
 
+    var totalEntries = 0;
+    for (var bc = 0; bc < batches.length; bc++) totalEntries += (batches[bc].entries || []).length;
+    if (!totalEntries) {
+        notes.push('Nothing readable was found in \u201c' + root.getName() + '\u201d. ' +
+            'Press Diagnose to see every file the script can see and why it was skipped.');
+    }
+
     for (var b = 0; b < batches.length; b++) {
         var batch = batches[b];
         var byTemplate = {};
 
-        var files = batch.folder.getFiles();
-        while (files.hasNext()) {
-            var file = files.next();
-            var table = null;
+        var entries = batch.entries || [];
+        for (var ei = 0; ei < entries.length; ei++) {
+            var file = entries[ei].file;
+            var tables = [];
             try {
-                table = evalReadResponseFile(file);
+                // Follows shortcuts, .url files, Docs and link-index Sheets.
+                tables = evalTablesFromEntry(file, notes, 0);
             } catch (e) {
                 notes.push(file.getName() + ': ' + (e.message || e));
                 continue;
             }
-            if (!table) continue;
 
-            var built = evalBuildRecord(table, false);
-            if (built.note) notes.push(built.note);
-            if (!built.ok) continue;
+            for (var ti = 0; ti < tables.length; ti++) {
+                var built = evalBuildRecord(tables[ti], false);
+                if (built.note) notes.push(built.note);
+                if (!built.ok) continue;
 
-            var key = built.record.templateKey;
-            if (!byTemplate[key]) byTemplate[key] = [];
-            byTemplate[key].push(built.record);
+                var key = built.record.templateKey;
+                if (!byTemplate[key]) byTemplate[key] = [];
+                byTemplate[key].push(built.record);
+            }
         }
 
         for (var tk in byTemplate) {
@@ -743,4 +770,505 @@ function testEvalExportSetup() {
     }
     Logger.log(lines.join('\n'));
     return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Link resolution
+//
+// Your Drive folder holds LINKS to forms, not always the forms themselves.
+// A "link" can arrive in several shapes, and this section handles all of them:
+//
+//   1. Drive shortcut          (right-click > Add shortcut to Drive)
+//   2. .url / .webloc file     (dragged from a browser)
+//   3. a plain .txt file       containing one or more form URLs
+//   4. a Google Doc            with the links pasted or hyperlinked in it
+//   5. a Google Sheet          with a column headed Link / URL / Form
+//   6. the real Form or Sheet  (handled already)
+// ---------------------------------------------------------------------------
+
+var EVAL_SHORTCUT_MIME = 'application/vnd.google-apps.shortcut';
+
+/** Pulls every Google file reference out of a blob of text. */
+function evalTargetsFromText(text) {
+    var found = [], seen = {};
+    var str = String(text || '');
+
+    function push(kind, id, url) {
+        if (!id) return;
+        var key = kind + ':' + id;
+        if (seen[key]) return;
+        seen[key] = true;
+        found.push({ kind: kind, id: id, url: url || '' });
+    }
+
+    // Published form links: /forms/d/e/<publishedId>/viewform
+    var rePublished = /forms\/d\/e\/([A-Za-z0-9_-]{20,})/g, m;
+    while ((m = rePublished.exec(str)) !== null) push('formPublished', m[1], m[0]);
+
+    // Editable form links: /forms/d/<fileId>/edit
+    var reForm = /forms\/d\/(?!e\/)([A-Za-z0-9_-]{20,})/g;
+    while ((m = reForm.exec(str)) !== null) push('form', m[1], m[0]);
+
+    // Spreadsheet links
+    var reSheet = /spreadsheets\/d\/([A-Za-z0-9_-]{20,})/g;
+    while ((m = reSheet.exec(str)) !== null) push('sheet', m[1], m[0]);
+
+    // Generic file links and open?id= links - type discovered later.
+    var reFile = /(?:file\/d\/|open\?id=|[?&]id=)([A-Za-z0-9_-]{20,})/g;
+    while ((m = reFile.exec(str)) !== null) push('unknown', m[1], m[0]);
+
+    return found;
+}
+
+/** Drive API v3 lookup. Needed because DriveApp cannot follow shortcuts. */
+function evalDriveMeta(id) {
+    var url = 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) +
+        '?supportsAllDrives=true&fields=id,name,mimeType,shortcutDetails';
+    var res = UrlFetchApp.fetch(url, {
+        method: 'get',
+        muteHttpExceptions: true,
+        headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }
+    });
+    if (res.getResponseCode() !== 200) return null;
+    try { return JSON.parse(res.getContentText()); } catch (e) { return null; }
+}
+
+/** Reads the text out of any file that might be carrying links. */
+function evalTextFromFile(file, mime) {
+    if (mime === MimeType.GOOGLE_DOCS) {
+        var doc = DocumentApp.openById(file.getId());
+        var body = doc.getBody();
+        var text = body.getText();
+        // Hyperlinks whose display text is not the URL itself.
+        var n = body.getNumChildren();
+        for (var i = 0; i < n; i++) {
+            var child = body.getChild(i);
+            if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) continue;
+            var para = child.asParagraph();
+            for (var j = 0; j < para.getNumChildren(); j++) {
+                var kid = para.getChild(j);
+                if (kid.getType() !== DocumentApp.ElementType.TEXT) continue;
+                var t = kid.asText(), raw = t.getText();
+                for (var k = 0; k < raw.length; k++) {
+                    var link = t.getLinkUrl(k);
+                    if (link) text += '\n' + link;
+                }
+            }
+        }
+        return text;
+    }
+    return file.getBlob().getDataAsString();
+}
+
+/** A Sheet acting as an index of form links, rather than response data. */
+function evalLinkSheetTargets(id) {
+    var ss = SpreadsheetApp.openById(id);
+    var sheet = ss.getSheets()[0];
+    if (!sheet || sheet.getLastRow() < 1) return null;
+
+    var values = sheet.getRange(1, 1, Math.min(sheet.getLastRow(), 400),
+        Math.max(1, sheet.getLastColumn())).getValues();
+
+    var headerText = (values[0] || []).join(' ').toLowerCase();
+    var looksLikeIndex = /\b(link|url|form)\b/.test(headerText);
+
+    var text = '';
+    for (var r = 0; r < values.length; r++) {
+        for (var c = 0; c < values[r].length; c++) text += ' ' + values[r][c];
+    }
+    // Also catch cells where the URL is a hyperlink behind display text.
+    try {
+        var formulas = sheet.getRange(1, 1, Math.min(sheet.getLastRow(), 400),
+            Math.max(1, sheet.getLastColumn())).getFormulas();
+        for (var fr = 0; fr < formulas.length; fr++) text += ' ' + formulas[fr].join(' ');
+    } catch (e) { }
+
+    var targets = evalTargetsFromText(text);
+    // Only treat it as an index if it really points at other files.
+    if (!targets.length) return null;
+    if (!looksLikeIndex && targets.length < 2) return null;
+    return targets;
+}
+
+/** Opens a form target and returns its response table. */
+function evalTableFromFormTarget(target, label) {
+    if (target.kind === 'form') {
+        return formResponsesFromForm(target.id, label);
+    }
+    // Published /forms/d/e/ ids are NOT file ids, so they cannot be opened
+    // directly. openByUrl works when the deployer owns or can edit the form.
+    var form = FormApp.openByUrl('https://docs.google.com/forms/d/e/' + target.id + '/viewform');
+    var responses = form.getResponses();
+    if (!responses.length) {
+        throw httpError('\u201c' + label + '\u201d has no responses yet.', 'NO_RESPONSES');
+    }
+    var items = form.getItems();
+    var headers = items.map(function (it) { return it.getTitle(); });
+    var rows = responses.map(function (resp) {
+        var byId = {};
+        resp.getItemResponses().forEach(function (ir) { byId[ir.getItem().getId()] = ir.getResponse(); });
+        return items.map(function (it) {
+            var v = byId[it.getId()];
+            if (v === null || v === undefined) return '';
+            return (v instanceof Array) ? v.join(', ') : String(v);
+        });
+    });
+    return { name: label, headers: headers, rows: rows };
+}
+
+/**
+ * Turns ONE Drive entry into zero or more response tables, following
+ * shortcuts and link files as needed.
+ * @return {Array} tables
+ */
+function evalTablesFromEntry(file, notes, depth) {
+    depth = depth || 0;
+    if (depth > 3) return [];
+
+    var name = file.getName();
+    var mime = file.getMimeType();
+
+    // --- the real thing -----------------------------------------------------
+    if (mime === MimeType.GOOGLE_FORMS) {
+        return [formResponsesFromForm(file.getId(), name)];
+    }
+    if (mime === 'text/csv') {
+        var arr = Utilities.parseCsv(file.getBlob().getDataAsString());
+        return [{ name: name, headers: (arr[0] || []).map(String), rows: arr.slice(1) }];
+    }
+    if (mime === MimeType.GOOGLE_SHEETS) {
+        // Could be response data, or an index of links.
+        var index = null;
+        try { index = evalLinkSheetTargets(file.getId()); } catch (e) { }
+        if (index && index.length) {
+            return evalTablesFromTargets(index, name, notes, depth);
+        }
+        return [formResponsesFromSheet(SpreadsheetApp.openById(file.getId()), name)];
+    }
+
+    // --- a Drive shortcut ---------------------------------------------------
+    if (mime === EVAL_SHORTCUT_MIME) {
+        var meta = evalDriveMeta(file.getId());
+        var details = meta && meta.shortcutDetails;
+        if (!details || !details.targetId) {
+            notes.push('\u201c' + name + '\u201d is a shortcut that could not be resolved. Open it, then add the real file or its link instead.');
+            return [];
+        }
+        var targetMime = details.targetMimeType || '';
+        var kind = targetMime === MimeType.GOOGLE_FORMS ? 'form'
+            : (targetMime === MimeType.GOOGLE_SHEETS ? 'sheet' : 'unknown');
+        return evalTablesFromTargets([{ kind: kind, id: details.targetId, url: '' }], name, notes, depth);
+    }
+
+    // --- a link-carrying file ----------------------------------------------
+    var isLinkFile = mime === MimeType.GOOGLE_DOCS ||
+        mime === 'text/plain' ||
+        mime === 'text/uri-list' ||
+        mime === 'application/internet-shortcut' ||
+        mime === 'application/octet-stream' ||
+        /\.(url|webloc|txt)$/i.test(name);
+
+    if (isLinkFile) {
+        var text = '';
+        try {
+            text = evalTextFromFile(file, mime);
+        } catch (e) {
+            notes.push('\u201c' + name + '\u201d could not be read: ' + (e.message || e));
+            return [];
+        }
+        var targets = evalTargetsFromText(text);
+        if (!targets.length) {
+            notes.push('\u201c' + name + '\u201d contains no Google Form or Sheet link.');
+            return [];
+        }
+        return evalTablesFromTargets(targets, name, notes, depth);
+    }
+
+    return [];
+}
+
+/** Resolves a list of extracted targets into response tables. */
+function evalTablesFromTargets(targets, sourceLabel, notes, depth) {
+    var tables = [];
+
+    for (var i = 0; i < targets.length; i++) {
+        var target = targets[i];
+        var label = sourceLabel;
+        if (targets.length > 1) label = sourceLabel + ' [' + (i + 1) + ']';
+
+        // Work out what an unknown id actually is.
+        if (target.kind === 'unknown') {
+            var meta = evalDriveMeta(target.id);
+            if (!meta) {
+                notes.push('\u201c' + label + '\u201d links to a file this account cannot open (' + target.id + '). Share it with the account running the script.');
+                continue;
+            }
+            if (meta.mimeType === EVAL_SHORTCUT_MIME && meta.shortcutDetails) {
+                target = {
+                    kind: meta.shortcutDetails.targetMimeType === MimeType.GOOGLE_FORMS ? 'form' : 'sheet',
+                    id: meta.shortcutDetails.targetId
+                };
+            } else if (meta.mimeType === MimeType.GOOGLE_FORMS) {
+                target = { kind: 'form', id: target.id };
+            } else if (meta.mimeType === MimeType.GOOGLE_SHEETS) {
+                target = { kind: 'sheet', id: target.id };
+            } else if (meta.mimeType === 'text/csv') {
+                try {
+                    var csv = Utilities.parseCsv(DriveApp.getFileById(target.id).getBlob().getDataAsString());
+                    tables.push({ name: label, headers: (csv[0] || []).map(String), rows: csv.slice(1) });
+                } catch (e0) {
+                    notes.push(label + ': ' + (e0.message || e0));
+                }
+                continue;
+            } else {
+                notes.push('\u201c' + label + '\u201d points to an unsupported file type (' + meta.mimeType + ').');
+                continue;
+            }
+        }
+
+        try {
+            if (target.kind === 'sheet') {
+                tables.push(formResponsesFromSheet(SpreadsheetApp.openById(target.id), label));
+            } else {
+                tables.push(evalTableFromFormTarget(target, label));
+            }
+        } catch (e) {
+            var msg = e && e.message ? e.message : String(e);
+            if (target.kind === 'formPublished') {
+                notes.push('\u201c' + label + '\u201d is a public \u201cfill-in\u201d form link, which cannot be opened for reading. ' +
+                    'Use the form\u2019s EDIT link (it contains /edit), a Drive shortcut to the form, or its linked response Sheet.');
+            } else {
+                notes.push('\u201c' + label + '\u201d could not be read: ' + msg);
+            }
+        }
+    }
+
+    return tables;
+}
+
+/** True when a Drive entry is something the builder can read or follow. */
+function evalIsUsableEntry(file) {
+    var mime = file.getMimeType();
+    if (mime === MimeType.GOOGLE_FORMS) return true;
+    if (mime === MimeType.GOOGLE_SHEETS) return true;
+    if (mime === 'text/csv') return true;
+    if (mime === EVAL_SHORTCUT_MIME) return true;
+    if (mime === MimeType.GOOGLE_DOCS) return true;
+    if (mime === 'text/plain' || mime === 'text/uri-list') return true;
+    if (mime === 'application/internet-shortcut') return true;
+    if (mime === 'application/octet-stream') return true;
+    return /\.(url|webloc|txt)$/i.test(file.getName());
+}
+
+/**
+ * Diagnostic. Run this from the editor when a link will not resolve - it
+ * reports exactly what the builder sees for every entry in the folder.
+ */
+function testEvalLinkDetection() {
+    var root = formsFolder();
+    var lines = ['Folder: ' + root.getName(), ''];
+    var notes = [];
+
+    function report(folderName, file) {
+        var name = file.getName();
+        var mime = file.getMimeType();
+        var label = (folderName ? folderName + ' / ' : '') + name;
+        if (!evalIsUsableEntry(file)) {
+            lines.push('SKIP  ' + label + '   [' + mime + ']  not a readable type');
+            return;
+        }
+        var tables = [];
+        try {
+            tables = evalTablesFromEntry(file, notes, 0);
+        } catch (e) {
+            lines.push('FAIL  ' + label + '   ' + (e.message || e));
+            return;
+        }
+        if (!tables.length) {
+            lines.push('EMPTY ' + label + '   [' + mime + ']  resolved to nothing');
+            return;
+        }
+        for (var t = 0; t < tables.length; t++) {
+            var tbl = tables[t];
+            var built = evalBuildRecord(tbl, false);
+            if (!built.ok) {
+                lines.push('WARN  ' + label + '  ->  ' + built.note);
+                continue;
+            }
+            var r = built.record;
+            lines.push('OK    ' + label + '  ->  ' + r.section +
+                '  (grade ' + r.grade + ', ' + EVAL_TEMPLATES[r.templateKey].label + ', ' +
+                r.students.length + ' responses)');
+        }
+    }
+
+    var subs = root.getFolders();
+    while (subs.hasNext()) {
+        var sf = subs.next();
+        if (sf.getName() === 'Generated Evaluations') continue;
+        var files = sf.getFiles();
+        while (files.hasNext()) report(sf.getName(), files.next());
+    }
+    var rootFiles = root.getFiles();
+    while (rootFiles.hasNext()) report('', rootFiles.next());
+
+    if (notes.length) {
+        lines.push('', 'Notes:');
+        for (var n = 0; n < notes.length; n++) lines.push('  - ' + notes[n]);
+    }
+
+    var out = lines.join('\n');
+    Logger.log(out);
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Folder walking
+//
+// Two things bite here, and both caused "0 files":
+//
+//   1. DriveApp.getFolders() does NOT return folder shortcuts. A shortcut to a
+//      folder shows up in getFiles() with the shortcut mime type instead, so a
+//      folder-of-shortcuts looks completely empty.
+//   2. Files are often nested deeper than one level, e.g.
+//      Forms / JHS / PASTOR / Grade 7 / <form>. Scanning only the immediate
+//      children finds nothing.
+//
+// So: resolve folder shortcuts, and recurse.
+// ---------------------------------------------------------------------------
+
+var EVAL_MAX_DEPTH = 10;
+
+/** If this entry is a shortcut pointing at a folder, return that folder. */
+function evalFolderFromShortcut(file) {
+    if (file.getMimeType() !== EVAL_SHORTCUT_MIME) return null;
+    var meta = evalDriveMeta(file.getId());
+    var details = meta && meta.shortcutDetails;
+    if (!details || !details.targetId) return null;
+    if (details.targetMimeType !== 'application/vnd.google-apps.folder') return null;
+    try { return DriveApp.getFolderById(details.targetId); } catch (e) { return null; }
+}
+
+/** Every real subfolder of a folder, including ones reached via shortcut. */
+function evalSubFolders(folder) {
+    var out = [], seen = {};
+
+    var direct = folder.getFolders();
+    while (direct.hasNext()) {
+        var d = direct.next();
+        if (d.getName() === 'Generated Evaluations') continue;
+        if (seen[d.getId()]) continue;
+        seen[d.getId()] = true;
+        out.push(d);
+    }
+
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+        var shortcutFolder = evalFolderFromShortcut(files.next());
+        if (!shortcutFolder) continue;
+        if (shortcutFolder.getName() === 'Generated Evaluations') continue;
+        if (seen[shortcutFolder.getId()]) continue;
+        seen[shortcutFolder.getId()] = true;
+        out.push(shortcutFolder);
+    }
+
+    return out;
+}
+
+/**
+ * Collects every readable entry under a folder, recursing into subfolders.
+ * Folder shortcuts are followed; file shortcuts are returned as-is so that
+ * evalTablesFromEntry can resolve them.
+ * @return {Array<{file:Object, path:string}>}
+ */
+function evalCollectEntries(folder, pathLabel, depth, seenFiles, out) {
+    depth = depth || 0;
+    seenFiles = seenFiles || {};
+    out = out || [];
+    if (depth > EVAL_MAX_DEPTH || out.length >= 800) return out;
+
+    var files = folder.getFiles();
+    while (files.hasNext() && out.length < 800) {
+        var file = files.next();
+        var id = file.getId();
+        if (seenFiles[id]) continue;
+
+        // A folder shortcut is not a readable entry - it is handled below.
+        if (file.getMimeType() === EVAL_SHORTCUT_MIME && evalFolderFromShortcut(file)) continue;
+
+        seenFiles[id] = true;
+        if (evalIsUsableEntry(file)) out.push({ file: file, path: pathLabel });
+    }
+
+    var subs = evalSubFolders(folder);
+    for (var i = 0; i < subs.length; i++) {
+        var sub = subs[i];
+        var childPath = pathLabel ? pathLabel + ' / ' + sub.getName() : sub.getName();
+        evalCollectEntries(sub, childPath, depth + 1, seenFiles, out);
+    }
+
+    return out;
+}
+
+/**
+ * Raw folder report. Lists EVERY entry with its real mime type, so a folder
+ * that appears empty can be diagnosed without guessing.
+ */
+function handleDiagnoseEvalFolder(session) {
+    var root = formsFolder();
+    var rows = [];
+    var counts = { usable: 0, skipped: 0, folders: 0, shortcutFolders: 0 };
+
+    function walk(folder, pathLabel, depth) {
+        if (depth > EVAL_MAX_DEPTH || rows.length >= 400) return;
+
+        var files = folder.getFiles();
+        while (files.hasNext() && rows.length < 400) {
+            var file = files.next();
+            var mime = file.getMimeType();
+            var target = '';
+
+            if (mime === EVAL_SHORTCUT_MIME) {
+                var meta = evalDriveMeta(file.getId());
+                var details = meta && meta.shortcutDetails;
+                target = details ? (details.targetMimeType || 'unknown target') : 'UNRESOLVED';
+                if (details && details.targetMimeType === 'application/vnd.google-apps.folder') {
+                    counts.shortcutFolders++;
+                    rows.push({
+                        path: pathLabel, name: file.getName(), mime: 'shortcut -> folder',
+                        usable: true, note: 'followed as a subfolder'
+                    });
+                    continue;
+                }
+            }
+
+            var usable = evalIsUsableEntry(file);
+            if (usable) counts.usable++; else counts.skipped++;
+            rows.push({
+                path: pathLabel,
+                name: file.getName(),
+                mime: mime + (target ? ' -> ' + target : ''),
+                usable: usable,
+                note: usable ? '' : 'not a readable type'
+            });
+        }
+
+        var subs = evalSubFolders(folder);
+        counts.folders += subs.length;
+        for (var i = 0; i < subs.length; i++) {
+            var sub = subs[i];
+            walk(sub, pathLabel ? pathLabel + ' / ' + sub.getName() : sub.getName(), depth + 1);
+        }
+    }
+
+    walk(root, '', 0);
+
+    return {
+        folderName: root.getName(),
+        folderId: root.getId(),
+        folderUrl: root.getUrl(),
+        counts: counts,
+        entries: rows,
+        capped: rows.length >= 400
+    };
 }

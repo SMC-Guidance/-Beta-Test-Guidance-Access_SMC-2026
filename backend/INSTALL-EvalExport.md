@@ -194,3 +194,80 @@ The older **Quick** tab still uses `computeEvalResult` / `tallyComments` in
 
 The new builder does not use either of them, so it is unaffected. Say the word
 if you want the old Quick tab corrected to match too.
+
+---
+
+## Form links
+
+If your folder holds LINKS to forms rather than the forms themselves, read
+`backend/LINKS-EXPLAINED.md`. It covers shortcuts, .url files, link docs, and the
+one link type Google does not allow reading (`/viewform`).
+
+To diagnose a link that will not resolve, run the function `testEvalLinkDetection`
+in the Apps Script editor. It prints one line per file saying exactly what it saw.
+
+
+---
+
+## Update: "0 files" fix (folder scanning)
+
+If the dropdown showed **0 files** even though the folder clearly has form links in it,
+it was caused by two limits in the first version:
+
+1. **Folder shortcuts were invisible.** Google's `getFolders()` does not return
+   shortcuts to folders. If your teacher folders are shortcuts (added with
+   *Add shortcut to Drive*), the script saw an empty folder. Shortcut folders
+   are now resolved and followed.
+2. **Only one level deep was scanned.** Files nested like
+   `Forms / Junior High / PASTOR / Grade 7 / <form link>` were never reached.
+   The scan now goes up to **10 levels deep**, matching the site's existing
+   Folder tool.
+
+### One extra line in `Code.gs`
+
+Add this next to the other two eval cases inside `doPost`:
+
+```js
+case 'diagnoseEvalFolder': return ok(handleDiagnoseEvalFolder(requireStaff(session)));
+```
+
+So all three lines together look like:
+
+```js
+case 'listEvalBatches':    return ok(handleListEvalBatches(requireStaff(session)));
+case 'buildEvalWorkbooks': return ok(handleBuildEvalWorkbooks(requireStaff(session), payload));
+case 'diagnoseEvalFolder': return ok(handleDiagnoseEvalFolder(requireStaff(session)));
+```
+
+Then **Deploy -> Manage deployments -> pencil -> New version -> Deploy**.
+
+### The Diagnose button
+
+The Evaluations screen now has a **Diagnose** button next to Preview and Build.
+It lists **every single file** the script can see, the folder it sits in, the
+exact type Google reports for it, and whether it will be used. Nothing is
+hidden, so if a file is being ignored you can see precisely why.
+
+Typical readings:
+
+| What you see | What it means |
+|---|---|
+| `shortcut -> folder` | A folder shortcut, now followed correctly |
+| `application/vnd.google-apps.form` | A real form, will be read |
+| `shortcut -> ...form` | A shortcut to a form, will be read |
+| `application/vnd.google-apps.document` | A doc; links inside it are extracted |
+| `image/jpeg`, `application/pdf` | Skipped, not response data |
+| **No rows at all** | The folder is empty *to the script's account* - see below |
+
+### If Diagnose shows nothing at all
+
+That means the script account cannot see inside the folder. Check:
+
+- **`FORMS_FOLDER_ID`** in Project Settings > Script Properties points at the
+  right folder. Open the folder in Drive and copy the id from the address bar:
+  `https://drive.google.com/drive/folders/`**`THIS_PART`**
+- The folder is **shared with the Google account that deployed the script**
+  (the account in *Deploy > Manage deployments > Execute as*). A folder owned by
+  a different account, or a school account with restricted sharing, is invisible
+  otherwise.
+- If the folder lives in a **Shared drive**, that account must be a member of it.
