@@ -714,6 +714,254 @@ function handleBuildEvalWorkbooks(session, p) {
 // ---------------------------------------------------------------------------
 
 /** Copies the template and fills one tab per section. */
+// ---------------------------------------------------------------------------
+// Tab naming: "10A - AP"
+//   grade + section letter (sections of that grade in alphabetical order)
+//   + the subject acronym. Senior High keeps its real section name instead of
+//   a letter, because SHS strands are not lettered.
+// ---------------------------------------------------------------------------
+
+// Sections per grade, ALPHABETICAL. Position decides the letter, so
+// ADOLPHINE = A, AMANDINE = B, CHIARA = C. Edit this list if sections change.
+var EVAL_SECTION_ROSTER = {
+    7: ['HOSEA', 'ISAIAH', 'JEREMIAH', 'MICAH'],
+    8: ['JOHN', 'LUKE', 'MARK', 'MATTHEW'],
+    9: ['AGNES', 'ANTHONY', 'CLARE'],
+    10: ['ADOLPHINE', 'AMANDINE', 'CHIARA']
+};
+
+var EVAL_SUBJECT_ACRONYMS = {
+    'MATHEMATICS': 'MATH',
+    'MATH': 'MATH',
+    'GENERAL MATHEMATICS': 'GENMATH',
+    'GEN MATH': 'GENMATH',
+    'STATISTICS AND PROBABILITY': 'STATS&PROB',
+    'ARALING PANLIPUNAN': 'AP',
+    'PHYSICAL EDUCATION': 'PE',
+    'HEALTH OPTIMIZING PHYSICAL EDUCATION': 'HOPE',
+    'CHRISTIAN LIVING EDUCATION': 'CLE',
+    'TECHNOLOGY AND LIVELIHOOD EDUCATION': 'TLE',
+    'INFORMATION AND COMMUNICATIONS TECHNOLOGY': 'ICT',
+    'INFORMATION AND COMMUNICATION TECHNOLOGY': 'ICT',
+    'MEDIA AND INFORMATION LITERACY': 'MIL',
+    'EMPOWERMENT TECHNOLOGIES': 'E-TECH',
+    'READING AND WRITING': 'R&W',
+    'ENGLISH FOR ACADEMIC AND PROFESSIONAL PURPOSES': 'EAPP',
+    'PERSONAL DEVELOPMENT': 'PERDEV',
+    'HOMEROOM GUIDANCE': 'HG',
+    'VALUES EDUCATION': 'VALUES',
+    'MOTHER TONGUE': 'MT'
+};
+
+/** Strips "ST.", "GRADE 9", punctuation and digits so sections compare cleanly. */
+function evalSectionKey(section) {
+    return String(section || '')
+        .toUpperCase()
+        .replace(/CLASS\s*ADVISER/g, ' ')
+        .replace(/\bGRADE\b|\bGR\b/g, ' ')
+        .replace(/\bST\b/g, ' ')
+        .replace(/[^A-Z]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/**
+ * A, B, C ... from the alphabetical position of the section within its grade.
+ * Falls back to the sections present in this build when the grade is not in
+ * the roster, so a new section still gets a sensible letter.
+ */
+function evalSectionLetter(grade, section, fallbackSections) {
+    var key = evalSectionKey(section);
+    if (!key) return '';
+
+    var list = null;
+    var roster = EVAL_SECTION_ROSTER[grade];
+    if (roster && roster.length) {
+        list = roster.slice();
+    } else if (fallbackSections && fallbackSections.length) {
+        list = [];
+        for (var f = 0; f < fallbackSections.length; f++) {
+            var k = evalSectionKey(fallbackSections[f]);
+            if (k && list.indexOf(k) < 0) list.push(k);
+        }
+        list.sort();
+    }
+    if (!list || !list.length) return '';
+
+    for (var i = 0; i < list.length; i++) {
+        if (list[i] === key || key.indexOf(list[i]) >= 0 || list[i].indexOf(key) >= 0) {
+            return String.fromCharCode(65 + i);
+        }
+    }
+    return '';
+}
+
+/** "Araling Panlipunan" -> "AP". Unknown multi-word subjects become initials. */
+function evalSubjectAcronym(subject) {
+    var key = String(subject || '').toUpperCase()
+        .replace(/[^A-Z0-9&]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!key) return '';
+    if (EVAL_SUBJECT_ACRONYMS[key]) return EVAL_SUBJECT_ACRONYMS[key];
+
+    // Drop a trailing grade number, e.g. "MATH 10" or "GRADE 10 MATH".
+    var bare = key.replace(/\bGRADE\b/g, ' ').replace(/\b\d{1,2}\b/g, ' ')
+        .replace(/\s+/g, ' ').trim();
+    if (EVAL_SUBJECT_ACRONYMS[bare]) return EVAL_SUBJECT_ACRONYMS[bare];
+    if (!bare) return key;
+    if (bare.indexOf(' ') < 0) return bare;
+
+    var skip = ['AND', 'OF', 'THE', 'IN', 'FOR', 'TO', '&'];
+    var words = [], parts = bare.split(' ');
+    for (var p = 0; p < parts.length; p++) {
+        if (parts[p] && skip.indexOf(parts[p]) < 0) words.push(parts[p]);
+    }
+    if (!words.length) return bare;
+    if (words.length === 1) return words[0];
+
+    var acr = '';
+    for (var w = 0; w < words.length; w++) acr += words[w].charAt(0);
+    return acr;
+}
+
+/** Builds the sheet name for one section. */
+function evalTabLabel(record, templateKey, fallbackSections) {
+    var subject = evalSubjectAcronym(record.subject);
+    var section = String(record.section || '').trim();
+
+    // Senior High: keep the real section name, no letter.
+    if (templateKey === 'shs') {
+        if (section && subject) return section + ' - ' + subject;
+        return section || subject || 'SECTION';
+    }
+
+    var letter = record.grade ? evalSectionLetter(record.grade, section, fallbackSections) : '';
+    if (record.grade && letter) {
+        var base = String(record.grade) + letter;
+        return subject ? base + ' - ' + subject : base;
+    }
+
+    // Unknown section or grade: fall back to what we actually know.
+    if (section && subject) return section + ' - ' + subject;
+    return section || subject || 'SECTION';
+}
+
+/** 1 -> A, 35 -> AI */
+function evalColLetter(n) {
+    var s = '';
+    while (n > 0) {
+        var m = (n - 1) % 26;
+        s = String.fromCharCode(65 + m) + s;
+        n = Math.floor((n - 1) / 26);
+    }
+    return s;
+}
+
+/** The grid templates have two halves; the category ones are a single list. */
+function evalSummaryBlocks(spec) {
+    if (spec.rows.length === 16) {
+        return [
+            { title: "TEACHER'S ACTIONS", rows: spec.rows.slice(0, 8) },
+            { title: "STUDENT'S ACTIONS", rows: spec.rows.slice(8) }
+        ];
+    }
+    return [{ title: 'ALL ITEMS', rows: spec.rows }];
+}
+
+/**
+ * When one workbook holds more than one section of the same subject, add a
+ * SUMMARY tab that puts those sections side by side, like the sample sheet.
+ * Everything is a live formula, so editing a section tab updates the summary.
+ */
+function evalWriteSummaryTab(ss, spec, records, tabNames, used) {
+    var groups = [], index = {};
+    for (var i = 0; i < records.length; i++) {
+        var gk = String(records[i].grade || '?') + '|' + String(records[i].subject || '?');
+        if (!(gk in index)) {
+            index[gk] = groups.length;
+            groups.push({ grade: records[i].grade, subject: records[i].subject, items: [] });
+        }
+        groups[index[gk]].items.push({ record: records[i], tab: tabNames[i] });
+    }
+
+    var wanted = [];
+    for (var g = 0; g < groups.length; g++) {
+        if (groups[g].items.length > 1) wanted.push(groups[g]);
+    }
+    if (!wanted.length) return null;
+
+    var name = evalSafeTabName('SUMMARY', used);
+    var sheet = ss.insertSheet(name, 0);
+    var avgCol = evalColLetter(spec.lastCol + 1);
+    var blocks = evalSummaryBlocks(spec);
+    var row = 1;
+
+    for (var q = 0; q < wanted.length; q++) {
+        var grp = wanted[q];
+        var cols = grp.items.length;
+        var meanCol = 2 + cols;              // column right after the sections
+        var src = ss.getSheetByName(grp.items[0].tab);
+
+        var heading = (grp.grade ? 'Grade ' + grp.grade : 'ALL GRADES')
+            + (grp.subject ? '  -  ' + grp.subject : '');
+        sheet.getRange(row, 1).setValue(heading).setFontWeight('bold').setFontSize(12);
+        row += 1;
+
+        for (var b = 0; b < blocks.length; b++) {
+            var block = blocks[b];
+
+            var header = [block.title];
+            for (var h = 0; h < cols; h++) header.push(grp.items[h].tab);
+            header.push('AVERAGE');
+            sheet.getRange(row, 1, 1, header.length).setValues([header])
+                .setFontWeight('bold').setBackground('#ffff00');
+            var headerRow = row;
+            row += 1;
+
+            var firstDataRow = row;
+            var labels = [], formulas = [];
+            for (var r = 0; r < block.rows.length; r++) {
+                var sheetRow = block.rows[r];
+                var label = '';
+                try { label = String(src.getRange(sheetRow, 1).getValue() || ''); } catch (e) { label = 'Item ' + sheetRow; }
+                labels.push([label]);
+
+                var line = [];
+                for (var c = 0; c < cols; c++) {
+                    var tab = String(grp.items[c].tab).replace(/'/g, "''");
+                    line.push("='" + tab + "'!" + avgCol + sheetRow);
+                }
+                line.push('=IFERROR(AVERAGE(B' + row + ':' + evalColLetter(1 + cols) + row + '),"")');
+                formulas.push(line);
+                row += 1;
+            }
+
+            sheet.getRange(firstDataRow, 1, labels.length, 1).setValues(labels);
+            sheet.getRange(firstDataRow, 2, formulas.length, cols + 1).setValues(formulas);
+            sheet.getRange(firstDataRow, 2, formulas.length, cols).setNumberFormat('0.00');
+            sheet.getRange(firstDataRow, meanCol, formulas.length, 1)
+                .setNumberFormat('0.00').setBackground('#00e000');
+
+            var lastDataRow = row - 1;
+            var avgLine = ['AVERAGE'];
+            for (var a = 0; a < cols; a++) {
+                var col = evalColLetter(2 + a);
+                avgLine.push('=IFERROR(AVERAGE(' + col + firstDataRow + ':' + col + lastDataRow + '),"")');
+            }
+            var mc = evalColLetter(meanCol);
+            avgLine.push('=IFERROR(AVERAGE(' + mc + firstDataRow + ':' + mc + lastDataRow + '),"")');
+            sheet.getRange(row, 1, 1, avgLine.length).setValues([avgLine])
+                .setFontWeight('bold').setBackground('#ffff00').setNumberFormat('0.00');
+            sheet.getRange(row, meanCol).setBackground('#ff00ff');
+            row += 2;
+        }
+        row += 1;
+    }
+
+    sheet.setColumnWidth(1, 320);
+    sheet.setFrozenColumns(1);
+    return sheet;
+}
+
 function evalWriteWorkbook(templateId, templateKey, records, fileName, outFolder, notes) {
     var spec = EVAL_TEMPLATES[templateKey];
 
@@ -732,16 +980,23 @@ function evalWriteWorkbook(templateId, templateKey, records, fileName, outFolder
     var used = {}, tabs = [], responses = 0;
     var capacity = spec.lastCol - spec.firstCol + 1;
 
+    // Used only when a grade is missing from EVAL_SECTION_ROSTER.
+    var sectionsInFile = records.map(function (r) { return r.section; });
+
     for (var i = 0; i < records.length; i++) {
         var record = records[i];
         // copyTo preserves every formula, merge and format from the template.
         var sheet = (i === 0) ? master : master.copyTo(ss);
-        var tabName = evalSafeTabName(record.section || record.subject || ('SECTION ' + (i + 1)), used);
+        var tabName = evalSafeTabName(
+            evalTabLabel(record, templateKey, sectionsInFile) || ('SECTION ' + (i + 1)), used);
         sheet.setName(tabName);
         evalFillSheet(sheet, spec, record, notes);
         tabs.push(tabName);
         responses += Math.min(record.students.length, capacity);
     }
+
+    // Side-by-side comparison when the file holds 2+ sections of a subject.
+    evalWriteSummaryTab(ss, spec, records, tabs, used);
 
     evalWriteCommentsTab(ss, records, used);
 
