@@ -1564,7 +1564,7 @@ var EVAL_MAX_DEPTH = 10;
 
 // Google kills any web-app request at 6 minutes with no result at all. These
 // caps make the scan always come back with something useful instead.
-var EVAL_TIME_BUDGET_MS = 70 * 1000;
+var EVAL_TIME_BUDGET_MS = 45 * 1000;
 // Wall-clock ceiling for a whole "build everything" request. Google kills any
 // Apps Script request at 6 minutes; stopping at 4 leaves room to save results.
 var EVAL_BUILD_BUDGET_MS = 240 * 1000;
