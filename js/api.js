@@ -81,10 +81,28 @@ SMC.api = (function () {
                 throw new Error('The backend returned an error (HTTP ' + r.status + '). ' +
                     'Open the Apps Script project and check Executions for the failing run.');
             }
-            return r.json().catch(function () {
-                throw new Error('The backend replied with something that is not JSON. That normally ' +
-                    'means the deployment URL is serving a Google sign-in or error page. Confirm the ' +
-                    'web app is deployed with access set to "Anyone".');
+            // Read the body as text first. When it is not JSON the actual page
+            // content names the cause, so surface it instead of guessing.
+            return r.text().then(function (body) {
+                try {
+                    return JSON.parse(body);
+                } catch (parseErr) {
+                    var raw = String(body || '');
+                    var snippet = raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
+                    var hint = '';
+                    if (/accounts\.google\.com|sign ?in/i.test(raw)) {
+                        hint = ' It looks like a Google sign-in page, so set the web app access to "Anyone".';
+                    } else if (/exceeded maximum execution time/i.test(raw)) {
+                        hint = ' The script hit Google\'s 6-minute limit. Run one teacher folder at a time.';
+                    } else if (/temporarily unavailable|try again later|error has occurred/i.test(raw)) {
+                        hint = ' Google returned a temporary error page. Wait a minute and retry.';
+                    } else if (/authoriz/i.test(raw)) {
+                        hint = ' The script needs authorization. Open the editor and run authorizeOnce.';
+                    }
+                    throw new Error('The backend replied with something that is not JSON (HTTP ' +
+                        r.status + ').' + hint + ' First part of the reply: ' +
+                        (snippet || '(the reply was empty)'));
+                }
             });
         }).then(function (res) {
             if (!res || res.ok !== true) {
