@@ -129,6 +129,7 @@
 .ex-help-grid {
   display: grid; gap: 12px; margin: 12px 0 2px;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+<<<<<<< HEAD
 }
 .ex-help-box { background: #fff; border: 1px solid #e3eaf4; border-radius: 8px; padding: 12px 14px; }
 .ex-help-bt { font-weight: 600; color: #17305c; margin-bottom: 8px; font-size: 13px; }
@@ -178,3 +179,25 @@
   border: 1px solid #d9e2ef; border-radius: 6px; padding: 2px 8px;
 }
 .ex-saved-dl:hover { background: #f7faff; }
+=======
+}
+.ex-help-box { background: #fff; border: 1px solid #e3eaf4; border-radius: 8px; padding: 12px 14px; }
+.ex-help-bt { font-weight: 600; color: #17305c; margin-bottom: 8px; font-size: 13px; }
+.ex-help-kv { display: flex; gap: 10px; margin-bottom: 7px; }
+.ex-help-kv span {
+  flex: 0 0 128px; font-weight: 600; color: #2f6fd0; font-size: 12.5px;
+}
+.ex-help-kv em { font-style: normal; color: #47566e; font-size: 12.5px; }
+.ex-help-note {
+  margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+  background: #fff8e6; border: 1px solid #f0e0b0; color: #5c4a1a; font-size: 12.5px;
+}
+.ex-help code {
+  background: #eef3fb; border: 1px solid #dde6f4; border-radius: 4px;
+  padding: 1px 5px; font-size: 12px; color: #1d3b6e;
+}
+@media (max-width: 560px) {
+  .ex-help-kv { display: block; }
+  .ex-help-kv span { display: block; margin-bottom: 2px; }
+}
+>>>>>>> 6a66e3ae479d9f60320cf81e9bea161ef45b416e

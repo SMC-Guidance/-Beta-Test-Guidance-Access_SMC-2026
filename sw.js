@@ -1,6 +1,10 @@
 /* SMC Guidance Center - service worker (PWA app shell) */
 "use strict";
+<<<<<<< HEAD
 var CACHE = 'smc-guidance-v8-20260914-1632';
+=======
+var CACHE = 'smc-guidance-v7-20260914-1430';
+>>>>>>> 6a66e3ae479d9f60320cf81e9bea161ef45b416e
 var CORE = [
   './',
   './index.html',
