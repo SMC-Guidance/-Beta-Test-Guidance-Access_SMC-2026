@@ -95,6 +95,80 @@ SMC.evalexport = (function () {
         if (x) x.addEventListener('click', function () { show(false); });
     }
 
+    // "Generated Evaluations" browser. Workbooks already built stay in Drive,
+    // so this lists them per teacher and spares the user a rebuild.
+    function renderSaved(res) {
+        var host = document.getElementById('exSaved');
+        if (!host) return;
+        if (!res) { host.innerHTML = ''; return; }
+
+        var teachers = res.teachers || [];
+        var loose = res.looseFiles || [];
+        var total = res.totalFiles || 0;
+
+        var h = '<div class="ex-saved-head">' +
+            '<div>' +
+              '<div class="ex-saved-title">Generated Evaluations</div>' +
+              '<div class="ex-saved-sub">' +
+                (total
+                  ? total + ' workbook' + (total === 1 ? '' : 's') + ' already built across ' +
+                    teachers.length + ' teacher folder' + (teachers.length === 1 ? '' : 's')
+                  : 'No workbooks here yet. Build one and it will appear in this list.') +
+                (res.outputFolderUrl
+                  ? ' &middot; <a href="' + esc(res.outputFolderUrl) + '" target="_blank" rel="noopener">Open the Drive folder</a>'
+                  : '') +
+              '</div>' +
+            '</div>' +
+            '<button id="exSavedRefresh" class="ex-btn ex-btn-ghost" type="button">Refresh</button>' +
+          '</div>';
+
+        function fileRow(f) {
+            return '<div class="ex-saved-file">' +
+                '<a href="' + esc(f.url) + '" target="_blank" rel="noopener">' + esc(f.name) + '</a>' +
+                (f.updated ? '<span class="ex-saved-when">' + esc(f.updated) + '</span>' : '') +
+                (f.xlsxUrl ? '<a class="ex-saved-dl" href="' + esc(f.xlsxUrl) + '">Excel</a>' : '') +
+              '</div>';
+        }
+
+        teachers.forEach(function (t) {
+            var files = t.files || [];
+            h += '<div class="ex-saved-group">' +
+                '<div class="ex-saved-teacher">' +
+                  (t.url
+                    ? '<a href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.teacher) + '</a>'
+                    : esc(t.teacher)) +
+                  '<span class="ex-saved-count">' + files.length + '</span>' +
+                '</div>';
+            files.forEach(function (f) { h += fileRow(f); });
+            h += '</div>';
+        });
+
+        if (loose.length) {
+            h += '<div class="ex-saved-group">' +
+                '<div class="ex-saved-teacher">Not in a teacher folder' +
+                  '<span class="ex-saved-count">' + loose.length + '</span></div>';
+            loose.forEach(function (f) { h += fileRow(f); });
+            h += '</div>';
+        }
+
+        host.innerHTML = h;
+
+        var btn = document.getElementById('exSavedRefresh');
+        if (btn) btn.addEventListener('click', function () { loadSaved(true); });
+    }
+
+    function loadSaved(announce) {
+        if (!window.SMC || !SMC.api || !SMC.api.listGeneratedEvals) return;
+        var host = document.getElementById('exSaved');
+        if (host && announce) host.innerHTML = '<div class="ex-saved-sub">Loading...</div>';
+        SMC.api.listGeneratedEvals().then(renderSaved).catch(function (err) {
+            if (!host) return;
+            host.innerHTML = '<div class="ex-saved-head"><div class="ex-saved-sub">' +
+                'Could not list the generated workbooks. ' + esc(err && err.message ? err.message : String(err)) +
+                '</div></div>';
+        });
+    }
+
     function template() {
         return '' +
             '<div class="ex-card" id="exCard">' +
@@ -115,6 +189,7 @@ SMC.evalexport = (function () {
             helpTemplate() +
             '<div id="exStatus" class="ex-status"></div>' +
             '<div id="exResults" class="ex-results"></div>' +
+            '<div id="exSaved" class="ex-saved"></div>' +
             '</div>';
     }
 
@@ -331,6 +406,7 @@ SMC.evalexport = (function () {
         wire();
         bindHelp();
         loadBatches();
+        loadSaved();
         return true;
     }
 
@@ -376,5 +452,5 @@ SMC.evalexport = (function () {
         autoMount();
     }
 
-    return { mount: mount, refresh: loadBatches, build: run, diagnose: diagnose };
+    return { mount: mount, refresh: loadBatches, build: run, diagnose: diagnose, saved: loadSaved };
 })();

@@ -149,3 +149,32 @@
   .ex-help-kv { display: block; }
   .ex-help-kv span { display: block; margin-bottom: 2px; }
 }
+
+
+/* ---- Generated Evaluations browser ------------------------------------ */
+.ex-saved { margin-top: 18px; border-top: 1px solid #e3eaf4; padding-top: 14px; }
+.ex-saved-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ex-saved-title { font-weight: 600; color: #17305c; font-size: 14px; }
+.ex-saved-sub { color: #5d6b82; font-size: 12.5px; margin-top: 2px; }
+.ex-saved-group { margin-top: 12px; }
+.ex-saved-teacher {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600; font-size: 13px; color: #24324a;
+  padding-bottom: 5px; border-bottom: 1px dashed #e3eaf4;
+}
+.ex-saved-count {
+  background: #eef3fb; color: #2f6fd0; border-radius: 10px;
+  padding: 1px 8px; font-size: 11.5px; font-weight: 600;
+}
+.ex-saved-file {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0 6px 2px; font-size: 13px; border-bottom: 1px solid #f2f5fa;
+}
+.ex-saved-file > a:first-child { color: #1d3b6e; text-decoration: none; flex: 1 1 auto; }
+.ex-saved-file > a:first-child:hover { text-decoration: underline; }
+.ex-saved-when { color: #8794a8; font-size: 11.5px; flex: 0 0 auto; }
+.ex-saved-dl {
+  flex: 0 0 auto; font-size: 11.5px; color: #2f6fd0; text-decoration: none;
+  border: 1px solid #d9e2ef; border-radius: 6px; padding: 2px 8px;
+}
+.ex-saved-dl:hover { background: #f7faff; }
