@@ -105,33 +105,47 @@
 }
 
 
-/* ---- Generated Evaluations browser ---- */
-.ex-saved-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-top: 22px;
-    padding-top: 16px;
-    border-top: 1px solid rgba(148, 163, 184, .25);
+/* ---- in-page tutorial ------------------------------------------------- */
+.ex-help {
+  margin: 14px 0 4px;
+  padding: 16px 18px;
+  border: 1px solid #d9e2ef;
+  border-left: 4px solid #2f6fd0;
+  border-radius: 10px;
+  background: #f7faff;
+  color: #24324a;
+  font-size: 13.5px;
+  line-height: 1.55;
 }
-.ex-saved-title { margin: 0; font-size: 15px; font-weight: 650; }
-.ex-saved-sub { margin: 6px 0 10px; }
-.ex-saved-group {
-    border: 1px solid rgba(148, 163, 184, .25);
-    border-radius: 10px;
-    padding: 8px 12px;
-    margin-bottom: 8px;
+.ex-help-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ex-help-h { margin: 0 0 2px; font-size: 15px; color: #17305c; }
+.ex-help-x {
+  border: 0; background: transparent; cursor: pointer;
+  font-size: 22px; line-height: 1; color: #7a8aa3; padding: 0 4px;
 }
-.ex-saved-group summary {
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    font-weight: 600;
+.ex-help-x:hover { color: #24324a; }
+.ex-steps { margin: 10px 0 4px; padding-left: 22px; }
+.ex-steps li { margin: 0 0 7px; }
+.ex-help-grid {
+  display: grid; gap: 12px; margin: 12px 0 2px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
-.ex-saved-teacher { letter-spacing: .01em; }
-.ex-saved-count { font-size: 12px; opacity: .7; font-weight: 500; }
-.ex-saved-group .ex-table { margin-top: 8px; }
-.ex-saved-group .ex-table td { padding: 5px 8px; vertical-align: top; }
+.ex-help-box { background: #fff; border: 1px solid #e3eaf4; border-radius: 8px; padding: 12px 14px; }
+.ex-help-bt { font-weight: 600; color: #17305c; margin-bottom: 8px; font-size: 13px; }
+.ex-help-kv { display: flex; gap: 10px; margin-bottom: 7px; }
+.ex-help-kv span {
+  flex: 0 0 128px; font-weight: 600; color: #2f6fd0; font-size: 12.5px;
+}
+.ex-help-kv em { font-style: normal; color: #47566e; font-size: 12.5px; }
+.ex-help-note {
+  margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+  background: #fff8e6; border: 1px solid #f0e0b0; color: #5c4a1a; font-size: 12.5px;
+}
+.ex-help code {
+  background: #eef3fb; border: 1px solid #dde6f4; border-radius: 4px;
+  padding: 1px 5px; font-size: 12px; color: #1d3b6e;
+}
+@media (max-width: 560px) {
+  .ex-help-kv { display: block; }
+  .ex-help-kv span { display: block; margin-bottom: 2px; }
+}

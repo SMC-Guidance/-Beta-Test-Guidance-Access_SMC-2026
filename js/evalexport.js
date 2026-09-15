@@ -17,6 +17,84 @@ SMC.evalexport = (function () {
         if (kind === 'error') console.error(msg); else console.log(msg);
     }
 
+    // In-page tutorial. Written so a first-time user can run a build without
+    // any outside instructions. Collapsed state is remembered per browser.
+    function helpTemplate() {
+        return '' +
+        '<div id="exHelp" class="ex-help" hidden>' +
+          '<div class="ex-help-top">' +
+            '<h4 class="ex-help-h">How to build evaluation workbooks</h4>' +
+            '<button id="exHelpClose" class="ex-help-x" type="button" title="Close">&times;</button>' +
+          '</div>' +
+
+          '<ol class="ex-steps">' +
+            '<li><b>Pick a teacher folder.</b> Use the dropdown on the left. ' +
+              'Start with one teacher rather than <i>All teacher folders</i> &mdash; ' +
+              'the whole folder holds hundreds of forms and can run past the time limit.</li>' +
+            '<li><b>Click Preview.</b> This reads the forms and shows what it found ' +
+              '(teacher, subject, section, how many students answered) ' +
+              '<u>without</u> creating any file. Check the names look right.</li>' +
+            '<li><b>Click Build workbooks.</b> This creates the Excel files in Google Drive. ' +
+              'Each one lands in <b>Generated Evaluations &rsaquo; [TEACHER NAME]</b>.</li>' +
+            '<li><b>Open the links.</b> When the build finishes, each workbook appears below ' +
+              'with a link. They stay in Drive, so you do not need to build again.</li>' +
+          '</ol>' +
+
+          '<div class="ex-help-grid">' +
+            '<div class="ex-help-box">' +
+              '<div class="ex-help-bt">What the buttons do</div>' +
+              '<div class="ex-help-kv"><span>Diagnose</span><em>Lists every file it can see in the folder. ' +
+                'Use it when a teacher or form seems to be missing.</em></div>' +
+              '<div class="ex-help-kv"><span>Preview</span><em>A dry run. Reads the data and reports, ' +
+                'but writes nothing.</em></div>' +
+              '<div class="ex-help-kv"><span>Build workbooks</span><em>The real thing. ' +
+                'Creates the Excel files in Drive.</em></div>' +
+            '</div>' +
+
+            '<div class="ex-help-box">' +
+              '<div class="ex-help-bt">What you get in each file</div>' +
+              '<div class="ex-help-kv"><span>One tab per section</span><em>Named like <code>10A - AP</code> ' +
+                '(grade, section letter, subject). Senior High keeps its section name, such as ' +
+                '<code>MERCY - GENMATH</code>.</em></div>' +
+              '<div class="ex-help-kv"><span>SUMMARY tab</span><em>Appears when a file holds two or more ' +
+                'sections, comparing them side by side.</em></div>' +
+              '<div class="ex-help-kv"><span>COMMENTS SUMMARY</span><em>Every student comment, ' +
+                'shortest first, with repeats counted.</em></div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="ex-help-note">' +
+            '<b>Good to know.</b> Averages are computed by the template formulas, not by the website, ' +
+            'so the numbers match what the school already uses. ' +
+            'Running a build twice replaces the earlier file for that teacher instead of piling up copies. ' +
+            'A big folder can take a few minutes &mdash; leave the tab open while it works.' +
+          '</div>' +
+        '</div>';
+    }
+
+    // Toggle + remember. Opens by itself the first time, so a new user sees it.
+    function bindHelp() {
+        var panel = document.getElementById('exHelp');
+        var btn = document.getElementById('exHelpBtn');
+        var x = document.getElementById('exHelpClose');
+        if (!panel || !btn) return;
+
+        var KEY = 'smc_eval_help_seen';
+        var seen = false;
+        try { seen = localStorage.getItem(KEY) === '1'; } catch (e) { }
+        if (!seen) panel.hidden = false;
+
+        function show(on) {
+            panel.hidden = !on;
+            btn.textContent = on ? 'Hide guide' : 'How to use';
+            try { localStorage.setItem(KEY, '1'); } catch (e) { }
+        }
+        show(!panel.hidden);
+
+        btn.addEventListener('click', function () { show(panel.hidden); });
+        if (x) x.addEventListener('click', function () { show(false); });
+    }
+
     function template() {
         return '' +
             '<div class="ex-card" id="exCard">' +
@@ -29,69 +107,15 @@ SMC.evalexport = (function () {
             '</div>' +
             '<div class="ex-row">' +
             '<select id="exBatch" class="ex-select"><option value="">All teacher folders</option></select>' +
+            '<button id="exHelpBtn" class="ex-btn ex-btn-ghost" type="button">How to use</button>' +
             '<button id="exDiag" class="ex-btn ex-btn-ghost" type="button">Diagnose</button>' +
             '<button id="exPreview" class="ex-btn ex-btn-ghost" type="button">Preview</button>' +
             '<button id="exBuild" class="ex-btn" type="button">Build workbooks</button>' +
             '</div>' +
+            helpTemplate() +
             '<div id="exStatus" class="ex-status"></div>' +
             '<div id="exResults" class="ex-results"></div>' +
-            '<div class="ex-saved-head">' +
-            '<h4 class="ex-saved-title">Generated Evaluations</h4>' +
-            '<button id="exSavedRefresh" class="ex-btn ex-btn-ghost" type="button">Refresh</button>' +
-            '</div>' +
-            '<div id="exSaved" class="ex-saved"><span class="ex-muted">Loading saved workbooks...</span></div>' +
             '</div>';
-    }
-
-    function renderSaved(res) {
-        var el = document.getElementById('exSaved');
-        if (!el) return;
-        if (!res || !res.totalFiles) {
-            el.innerHTML = '<span class="ex-muted">Nothing built yet. Use Build workbooks above and the results will be listed here.</span>';
-            return;
-        }
-
-        var groups = (res.teachers || []).slice();
-        if (res.looseFiles && res.looseFiles.length) {
-            groups.push({ teacher: 'Older builds (not in a teacher folder)', url: res.outputFolderUrl, files: res.looseFiles });
-        }
-
-        var html = '<p class="ex-muted ex-saved-sub">' + res.totalFiles + ' workbook(s) in ' +
-            '<a class="ex-link" target="_blank" rel="noopener" href="' + esc(res.outputFolderUrl) + '">' +
-            esc(res.outputFolder) + '</a> on Google Drive.</p>';
-
-        groups.forEach(function (g) {
-            html += '<details class="ex-saved-group">' +
-                '<summary><span class="ex-saved-teacher">' + esc(g.teacher) + '</span>' +
-                '<span class="ex-saved-count">' + (g.files || []).length + ' file(s)</span></summary>';
-            html += '<table class="ex-table"><tbody>';
-            (g.files || []).forEach(function (f) {
-                html += '<tr>' +
-                    '<td><a class="ex-link" target="_blank" rel="noopener" href="' + esc(f.url) + '">' + esc(f.name) + '</a></td>' +
-                    '<td class="ex-muted">' + esc(f.updated) + '</td>' +
-                    '<td><a class="ex-link" href="' + esc(f.xlsxUrl) + '">Excel</a></td>' +
-                    '</tr>';
-            });
-            html += '</tbody></table></details>';
-        });
-
-        el.innerHTML = html;
-    }
-
-    function loadSaved() {
-        var el = document.getElementById('exSaved');
-        if (!el) return;
-        if (!window.SMC || !SMC.api || !SMC.api.listGeneratedEvals) {
-            el.innerHTML = '<span class="ex-muted">Update js/api.js to see saved workbooks here.</span>';
-            return;
-        }
-        el.innerHTML = '<span class="ex-muted">Loading saved workbooks...</span>';
-        SMC.api.listGeneratedEvals().then(function (res) {
-            renderSaved(res);
-        }).catch(function (err) {
-            el.innerHTML = '<span class="ex-err">Could not load saved workbooks: ' +
-                esc((err && err.message) || err) + '</span>';
-        });
     }
 
     function setBusy(on, label) {
@@ -213,7 +237,6 @@ SMC.evalexport = (function () {
                     'pick them one at a time from the dropdown.' : ''),
                 left.length ? 'err' : 'ok');
             renderResults(res);
-            loadSaved();
             if (!dryRun) toast(n + ' evaluation workbook(s) built.', 'success');
         }).catch(function (err) {
             setBusy(false);
@@ -306,10 +329,8 @@ SMC.evalexport = (function () {
         wrap.innerHTML = template();
         host.insertBefore(wrap.firstChild, host.firstChild);
         wire();
+        bindHelp();
         loadBatches();
-        loadSaved();
-        var sr = document.getElementById('exSavedRefresh');
-        if (sr) sr.addEventListener('click', loadSaved);
         return true;
     }
 
@@ -355,5 +376,5 @@ SMC.evalexport = (function () {
         autoMount();
     }
 
-    return { mount: mount, refresh: loadBatches, build: run, diagnose: diagnose, saved: loadSaved };
+    return { mount: mount, refresh: loadBatches, build: run, diagnose: diagnose };
 })();
