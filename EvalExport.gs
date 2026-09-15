@@ -424,14 +424,73 @@ function evalTemplateFileId() {
     return m ? m[0] : String(id);
 }
 
+/** True when `folder` sits directly inside `parent`. */
+function evalIsChildOf(folder, parent) {
+    try {
+        var pid = parent.getId();
+        var parents = folder.getParents();
+        while (parents.hasNext()) {
+            if (parents.next().getId() === pid) return true;
+        }
+    } catch (e) { /* treat as not a child */ }
+    return false;
+}
+
+/**
+ * Output always belongs INSIDE the eval forms folder, never in My Drive.
+ *
+ * Apps Script creates files owned by the deploying account, and anything
+ * created without an explicit parent lands in that account's My Drive root.
+ * An earlier run could also have left a stray "Generated Evaluations" there,
+ * so this moves such a folder back in rather than starting a second one and
+ * splitting the results across two places.
+ */
 function evalOutputFolder() {
+    var root = formsFolder();
+
+    // An explicit override is honoured only if it really lives under the forms
+    // folder. A stale id pointing at My Drive is exactly the reported bug.
     var id = prop('EVAL_OUTPUT_FOLDER', '');
     if (id) {
-        try { return DriveApp.getFolderById(id); } catch (e) { /* fall through */ }
+        try {
+            var pinned = DriveApp.getFolderById(id);
+            if (evalIsChildOf(pinned, root) || pinned.getId() === root.getId()) return pinned;
+        } catch (e) { /* unusable id - fall through */ }
     }
-    var root = formsFolder();
+
+    // Correct location.
     var existing = root.getFoldersByName('Generated Evaluations');
-    return existing.hasNext() ? existing.next() : root.createFolder('Generated Evaluations');
+    if (existing.hasNext()) return existing.next();
+
+    // Rescue a stray folder from My Drive so past builds are not orphaned.
+    try {
+        var stray = DriveApp.getRootFolder().getFoldersByName('Generated Evaluations');
+        if (stray.hasNext()) {
+            var found = stray.next();
+            found.moveTo(root);
+            return found;
+        }
+    } catch (e) { /* moveTo unavailable or not permitted - just create a new one */ }
+
+    return root.createFolder('Generated Evaluations');
+}
+
+/**
+ * Run from the editor to see exactly where output is going, and to pull a
+ * stray folder back under the forms folder.
+ */
+function testEvalOutputFolder() {
+    var root = formsFolder();
+    var out = evalOutputFolder();
+    var parents = [], it = out.getParents();
+    while (it.hasNext()) parents.push(it.next().getName());
+    Logger.log('Forms folder   : %s (%s)', root.getName(), root.getId());
+    Logger.log('Output folder  : %s (%s)', out.getName(), out.getId());
+    Logger.log('Output URL     : %s', out.getUrl());
+    Logger.log('Sits inside    : %s', parents.join(', ') || '(My Drive root)');
+    Logger.log('Correct place  : %s', evalIsChildOf(out, root) ? 'YES' : 'NO');
+    Logger.log('EVAL_OUTPUT_FOLDER property: %s', prop('EVAL_OUTPUT_FOLDER', '(not set)'));
+    return out.getUrl();
 }
 
 /**

@@ -126,6 +126,8 @@ SMC.evalexport = (function () {
             return '<div class="ex-saved-file">' +
                 '<a href="' + esc(f.url) + '" target="_blank" rel="noopener">' + esc(f.name) + '</a>' +
                 (f.updated ? '<span class="ex-saved-when">' + esc(f.updated) + '</span>' : '') +
+                (f.id ? '<button class="ex-saved-dl ex-prev-btn" type="button" data-id="' + esc(f.id) +
+                        '" data-name="' + esc(f.name) + '">Preview</button>' : '') +
                 (f.xlsxUrl ? '<a class="ex-saved-dl" href="' + esc(f.xlsxUrl) + '">Excel</a>' : '') +
               '</div>';
         }
@@ -166,6 +168,60 @@ SMC.evalexport = (function () {
             host.innerHTML = '<div class="ex-saved-head"><div class="ex-saved-sub">' +
                 'Could not list the generated workbooks. ' + esc(err && err.message ? err.message : String(err)) +
                 '</div></div>';
+        });
+    }
+
+    // Opens a workbook inside the site. Google serves a read-only rendering at
+    // /preview, so the numbers and tabs are visible without granting edit
+    // rights and without leaving the page.
+    function openPreview(id, name) {
+        closePreview();
+        var wrap = document.createElement('div');
+        wrap.id = 'exPrevWrap';
+        wrap.className = 'ex-prev-wrap';
+        wrap.innerHTML = '' +
+            '<div class="ex-prev-box" role="dialog" aria-modal="true">' +
+              '<div class="ex-prev-head">' +
+                '<div class="ex-prev-name">' + esc(name || 'Workbook') + '</div>' +
+                '<div class="ex-prev-acts">' +
+                  '<a class="ex-saved-dl" href="https://docs.google.com/spreadsheets/d/' + esc(id) +
+                    '/edit" target="_blank" rel="noopener">Open in Sheets</a>' +
+                  '<a class="ex-saved-dl" href="https://docs.google.com/spreadsheets/d/' + esc(id) +
+                    '/export?format=xlsx">Excel</a>' +
+                  '<button class="ex-prev-x" type="button" id="exPrevX" title="Close">&times;</button>' +
+                '</div>' +
+              '</div>' +
+              '<iframe class="ex-prev-frame" src="https://docs.google.com/spreadsheets/d/' +
+                esc(id) + '/preview" loading="lazy"></iframe>' +
+              '<div class="ex-prev-foot">Read-only preview. Sign in to the same Google account if it stays blank.</div>' +
+            '</div>';
+        document.body.appendChild(wrap);
+
+        wrap.addEventListener('click', function (e) {
+            if (e.target === wrap) closePreview();
+        });
+        var x = document.getElementById('exPrevX');
+        if (x) x.addEventListener('click', closePreview);
+        document.addEventListener('keydown', escClose);
+    }
+
+    function escClose(e) { if (e.key === 'Escape') closePreview(); }
+
+    function closePreview() {
+        var w = document.getElementById('exPrevWrap');
+        if (w && w.parentNode) w.parentNode.removeChild(w);
+        document.removeEventListener('keydown', escClose);
+    }
+
+    // Delegated so it keeps working after the list is re-rendered.
+    function bindPreview() {
+        if (bindPreview.__done) return;
+        bindPreview.__done = true;
+        document.addEventListener('click', function (e) {
+            var t = e.target;
+            if (!t || !t.className || String(t.className).indexOf('ex-prev-btn') < 0) return;
+            e.preventDefault();
+            openPreview(t.getAttribute('data-id'), t.getAttribute('data-name'));
         });
     }
 
@@ -405,6 +461,7 @@ SMC.evalexport = (function () {
         host.insertBefore(wrap.firstChild, host.firstChild);
         wire();
         bindHelp();
+        bindPreview();
         loadBatches();
         loadSaved();
         return true;
@@ -452,5 +509,5 @@ SMC.evalexport = (function () {
         autoMount();
     }
 
-    return { mount: mount, refresh: loadBatches, build: run, diagnose: diagnose, saved: loadSaved };
+    return { mount: mount, refresh: loadBatches, build: run, diagnose: diagnose, saved: loadSaved, preview: openPreview };
 })();

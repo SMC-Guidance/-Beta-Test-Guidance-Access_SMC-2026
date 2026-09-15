@@ -178,3 +178,37 @@
   border: 1px solid #d9e2ef; border-radius: 6px; padding: 2px 8px;
 }
 .ex-saved-dl:hover { background: #f7faff; }
+
+
+/* ---- in-site workbook preview ---------------------------------------- */
+.ex-prev-btn { cursor: pointer; background: #fff; font-family: inherit; }
+.ex-prev-wrap {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(20, 28, 44, 0.55);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.ex-prev-box {
+  background: #fff; border-radius: 12px; width: min(1180px, 96vw);
+  height: min(860px, 92vh); display: flex; flex-direction: column;
+  box-shadow: 0 18px 60px rgba(12, 20, 36, 0.35); overflow: hidden;
+}
+.ex-prev-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid #e3eaf4; background: #f7faff;
+}
+.ex-prev-name { font-weight: 600; color: #17305c; font-size: 14px; }
+.ex-prev-acts { display: flex; align-items: center; gap: 8px; }
+.ex-prev-x {
+  border: 0; background: transparent; cursor: pointer;
+  font-size: 24px; line-height: 1; color: #7a8aa3; padding: 0 4px;
+}
+.ex-prev-x:hover { color: #24324a; }
+.ex-prev-frame { flex: 1 1 auto; width: 100%; border: 0; }
+.ex-prev-foot {
+  padding: 8px 16px; border-top: 1px solid #eef2f8;
+  color: #8794a8; font-size: 11.5px; background: #fbfcfe;
+}
+@media (max-width: 560px) {
+  .ex-prev-wrap { padding: 0; }
+  .ex-prev-box { width: 100vw; height: 100vh; border-radius: 0; }
+}
