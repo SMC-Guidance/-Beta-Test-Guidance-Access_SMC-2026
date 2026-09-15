@@ -95,7 +95,6 @@ SMC.evalexport = (function () {
         if (x) x.addEventListener('click', function () { show(false); });
     }
 
-<<<<<<< HEAD
     // "Generated Evaluations" browser. Workbooks already built stay in Drive,
     // so this lists them per teacher and spares the user a rebuild.
     function renderSaved(res) {
@@ -170,8 +169,6 @@ SMC.evalexport = (function () {
         });
     }
 
-=======
->>>>>>> 6a66e3ae479d9f60320cf81e9bea161ef45b416e
     function template() {
         return '' +
             '<div class="ex-card" id="exCard">' +
@@ -192,10 +189,7 @@ SMC.evalexport = (function () {
             helpTemplate() +
             '<div id="exStatus" class="ex-status"></div>' +
             '<div id="exResults" class="ex-results"></div>' +
-<<<<<<< HEAD
             '<div id="exSaved" class="ex-saved"></div>' +
-=======
->>>>>>> 6a66e3ae479d9f60320cf81e9bea161ef45b416e
             '</div>';
     }
 
@@ -412,10 +406,7 @@ SMC.evalexport = (function () {
         wire();
         bindHelp();
         loadBatches();
-<<<<<<< HEAD
         loadSaved();
-=======
->>>>>>> 6a66e3ae479d9f60320cf81e9bea161ef45b416e
         return true;
     }
 
@@ -461,5 +452,5 @@ SMC.evalexport = (function () {
         autoMount();
     }
 
-    return { mount: mount, refresh: loadBatches, build: run, diagnose: diagnose };
+    return { mount: mount, refresh: loadBatches, build: run, diagnose: diagnose, saved: loadSaved };
 })();
